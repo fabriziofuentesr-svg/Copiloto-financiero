@@ -1,39 +1,32 @@
-// Polyfill de `window.storage` para ejecutar la app fuera del entorno de
-// artifacts de Claude (donde `window.storage` existe de forma nativa).
-// Implementa la misma interfaz async (get/set/delete/list) usando
-// localStorage, para que App.jsx funcione sin ningún cambio.
-(function installStorageShim() {
-  if (typeof window === "undefined") return;
-  if (window.storage) return; // ya provisto por el entorno (ej. Claude.ai)
+// Servicio de persistencia local. En este prototipo usamos localStorage,
+// pero está aislado en un único archivo para poder migrar a un backend
+// (Supabase/API propia) más adelante sin tocar el resto de la app.
+const NAMESPACE = "copiloto-financiero:";
 
-  const prefix = "copiloto-financiero:";
-  const keyFor = (key, shared) => `${prefix}${shared ? "shared:" : "personal:"}${key}`;
+export function loadState(key) {
+  try {
+    const raw = localStorage.getItem(NAMESPACE + key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.error("No se pudo leer del almacenamiento local", e);
+    return null;
+  }
+}
 
-  window.storage = {
-    async get(key, shared = false) {
-      const raw = localStorage.getItem(keyFor(key, shared));
-      if (raw === null) return null;
-      return { key, value: raw, shared };
-    },
-    async set(key, value, shared = false) {
-      localStorage.setItem(keyFor(key, shared), value);
-      return { key, value, shared };
-    },
-    async delete(key, shared = false) {
-      const existed = localStorage.getItem(keyFor(key, shared)) !== null;
-      localStorage.removeItem(keyFor(key, shared));
-      return { key, deleted: existed, shared };
-    },
-    async list(keyPrefix = "", shared = false) {
-      const scope = `${prefix}${shared ? "shared:" : "personal:"}`;
-      const keys = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(scope + keyPrefix)) {
-          keys.push(k.slice(scope.length));
-        }
-      }
-      return { keys, prefix: keyPrefix, shared };
-    },
-  };
-})();
+export function saveState(key, value) {
+  try {
+    localStorage.setItem(NAMESPACE + key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    console.error("No se pudo guardar en el almacenamiento local", e);
+    return false;
+  }
+}
+
+export function clearState(key) {
+  try {
+    localStorage.removeItem(NAMESPACE + key);
+  } catch (e) {
+    console.error("No se pudo borrar del almacenamiento local", e);
+  }
+}

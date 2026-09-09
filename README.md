@@ -1,6 +1,6 @@
-# Copiloto Financiero
+# Copiloto Financiero — Bolivia
 
-Prototipo de copiloto financiero personal para Bolivia, construido con React + Vite.
+Prototipo de copiloto financiero personal. React + Vite + Tailwind + React Router + Recharts.
 
 ## Ejecutar en local
 
@@ -9,60 +9,76 @@ npm install
 npm run dev
 ```
 
-Abre la URL que muestra la terminal (por defecto http://localhost:5173).
-
-## Subir a GitHub
+## Desplegar en Vercel (vía GitHub)
 
 ```bash
-git init
-git add .
-git commit -m "Copiloto financiero: primer prototipo"
+git init && git add . && git commit -m "Copiloto financiero: primera iteración modular"
 git branch -M main
 git remote add origin https://github.com/TU_USUARIO/TU_REPO.git
 git push -u origin main
 ```
 
-## Desplegar en Vercel
+En https://vercel.com/new, importa el repo. Vercel detecta Vite automáticamente
+(Build: `npm run build`, Output: `dist`).
 
-1. Entra a https://vercel.com/new e importa el repositorio de GitHub.
-2. Vercel detecta automáticamente el framework "Vite". Configuración por defecto:
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-   - Install Command: `npm install`
-3. Haz clic en "Deploy". En un par de minutos tendrás la URL pública.
+## Usuario semilla
 
-Cada `git push` a `main` vuelve a desplegar automáticamente.
+Los datos ficticios ("Nicolás") viven en `src/data/mockData.js` y se cargan la
+primera vez que abres la app. Desde ahí en adelante todo se persiste en
+`localStorage` del navegador (`src/services/storage.js`). Puedes reiniciar a
+los datos de ejemplo desde **Configuración → Reiniciar a datos de ejemplo**.
 
-## Nota sobre el guardado de datos
+## Qué se implementó en esta iteración (Fases 1, 2 y la mayor parte de 3)
 
-El prototipo original (creado como artifact de Claude) usa `window.storage`,
-una API de persistencia que solo existe dentro del entorno de artifacts de
-Claude.ai. Para que la app funcione igual una vez desplegada de forma
-independiente, `src/storage.js` agrega un polyfill: si `window.storage` no
-existe, lo crea usando `localStorage` con la misma interfaz (`get`, `set`,
-`delete`, `list`). `App.jsx` no cambió ni una línea — sigue llamando a
-`window.storage` exactamente igual, solo que ahora, fuera de Claude.ai, los
-datos quedan guardados en el navegador del usuario en vez de la nube.
+- Navegación real de 5 secciones (Inicio, Movimientos, Planes, Análisis,
+  Copiloto) + secundarias (Cuentas, Configuración), sidebar en desktop y
+  bottom nav en móvil, totalmente responsive.
+- Modelo de datos separado: `Account`, `Transaction`, `Category`, `Debt`,
+  `Goal`, todo en `src/context/FinanceContext.jsx` con persistencia
+  automática.
+- Motor financiero en `src/services/financial/*` (sin JSX, funciones puras):
+  `calculateFinancialHealth()`, `calculateAvailableMoney()`, `projectBalance()`,
+  `generateInsights()`, `evaluatePurchase()`, `answerQuestion()` (Copiloto),
+  simuladores de metas y de pago adicional de deuda.
+- **Inicio**: salud financiera (score + 5 componentes), dinero realmente
+  disponible (saldo − comprometido), resumen mensual comparado con el mes
+  anterior, proyección a 30 días, próximos compromisos, insight principal,
+  accionesrápidas funcionales.
+- **Movimientos**: alta y baja de ingresos/gastos, filtro por categoría,
+  cuenta y texto, orden, actualiza cuentas y dashboard en tiempo real.
+- **Cuentas**: alta/baja, saldo total vs. deuda de tarjetas.
+- **Planes**: Objetivos (con simulador "¿qué pasa si ahorro X?"), Fondo de
+  emergencia (calculado sobre gastos esenciales reales), Deudas (con
+  simulador de pago adicional).
+- **Análisis**: gastos por categoría (gráfico), comparación mensual
+  (gráfico), tendencias por categoría, listado de insights.
+- **Copiloto**: interfaz de chat que responde con datos reales del usuario
+  (sin IA todavía, arquitectura lista para conectarla).
+- **¿Puedo permitírmelo?** y **Flujo de dinero**: herramientas standalone,
+  accesibles desde acciones rápidas del dashboard.
 
-Esto significa que los datos se guardan por navegador/dispositivo, no en un
-backend compartido. Para sincronizar entre dispositivos hace falta agregar
-un backend propio (ver siguiente sección).
+## Qué falta / simplificaciones conocidas de esta iteración
 
-## Qué extender primero
+- **Editar** movimientos, cuentas, objetivos y deudas: hoy solo hay alta y
+  baja. Es lo primero que agregaría en la siguiente iteración.
+- El simulador de deuda usa interés simple mensual aproximado, no una tabla
+  de amortización completa capital/interés mes a mes.
+- Los compromisos recurrentes (alquiler, servicios, cuotas) no se concilian
+  todavía con las transacciones ya registradas ese mes — puede haber una
+  ligera duplicación conceptual entre "próximos compromisos" y "gastos ya
+  registrados". Se resuelve en la próxima fase de "presupuesto inteligente".
+- Sin integraciones bancarias reales, QR o notificaciones (tal como pediste
+  para este MVP).
+- Sin TypeScript todavía (decisión explicada en el análisis previo).
 
-1. **Backend real con base de datos**: hoy los datos viven en el navegador
-   (localStorage). Lo primero a añadir sería una API sencilla (por ejemplo
-   con Supabase, Firebase o un backend propio) para persistir el perfil
-   financiero del usuario en la nube, con login, y así poder usarlo desde
-   el celular y la computadora sin perder datos.
-2. **Motor de reglas más fino**: los umbrales de riesgo (DTI, fondo de
-   emergencia, tasas "caras") están fijos en el código. Convertirlos en
-   parámetros ajustables (o basados en datos reales de consumo en Bolivia)
-   mejoraría la precisión de los diagnósticos.
-3. **Explicaciones conversacionales**: usar la API de Claude para que el
-   usuario pueda preguntar en lenguaje natural ("¿puedo comprarme algo de
-   Bs 500 este mes?") y recibir una respuesta basada en los mismos cálculos
-   del motor financiero, en vez de solo ver el dashboard.
-4. **Historial y tendencias**: guardar el estado mes a mes (no solo el
-   perfil actual) para poder mostrar si la salud financiera del usuario
-   mejora o empeora con el tiempo.
+## Próxima iteración sugerida (Fases 4-6 restantes)
+
+1. Edición completa de todas las entidades (movimientos, cuentas, deudas,
+   objetivos).
+2. Presupuesto inteligente sugerido a partir del historial.
+3. Alertas inteligentes como notificaciones persistentes (no solo insights
+   dentro de Análisis).
+4. Tabla de amortización real para el simulador de deudas.
+5. Conectar el Copiloto a un modelo de IA real (Claude API), manteniendo
+   `copilotEngine.js` como la capa que decide qué contexto financiero
+   pasarle al modelo.
