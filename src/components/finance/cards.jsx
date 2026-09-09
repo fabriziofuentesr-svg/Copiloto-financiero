@@ -123,6 +123,7 @@ export function AlertBanner({ level = "warning", children }) {
     danger: "bg-brick/10 border-brick text-brick",
     warning: "bg-ochre/10 border-ochre text-[#8A5F1E]",
     positive: "bg-teal/10 border-teal text-teal",
+    neutral: "bg-paper-raised border-line text-ink-soft",
   };
   return <div className={`border rounded px-4 py-3 text-sm ${styles[level]}`}>{children}</div>;
 }

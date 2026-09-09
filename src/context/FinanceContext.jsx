@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useReducer } from "react";
-import { buildInitialState } from "../data/mockData.js";
+import { buildEmptyState, buildDemoState } from "../data/mockData.js";
 import { loadState, saveState } from "../services/storage.js";
 
 const STORAGE_KEY = "estado-financiero-v1";
@@ -15,8 +15,33 @@ function reducer(state, action) {
     case "LOAD_STATE":
       return action.payload;
 
-    case "RESET_TO_MOCK":
-      return buildInitialState();
+    // Carga los datos de demostración. Se usa únicamente si el usuario lo
+    // pide explícitamente desde Configuración; nunca al abrir la app.
+    case "LOAD_DEMO_DATA":
+      return buildDemoState();
+
+    // Completa el onboarding: guarda el perfil ingresado y marca
+    // onboardingCompleted en true. A partir de aquí la app entra directo.
+    case "COMPLETE_ONBOARDING":
+      return { ...state, profile: { ...state.profile, ...action.payload, onboardingCompleted: true } };
+
+    // Edición posterior del perfil desde Configuración (no toca los datos
+    // financieros, ni el flag de onboarding salvo que se lo pase explícito).
+    case "UPDATE_PROFILE":
+      return { ...state, profile: { ...state.profile, ...action.payload } };
+
+    // Borra los datos financieros (cuentas, movimientos, deudas, objetivos)
+    // pero conserva el perfil ya configurado por el usuario.
+    case "CLEAR_FINANCIAL_DATA":
+      return {
+        ...state,
+        accounts: [],
+        transactions: [],
+        goals: [],
+        debts: [],
+        recurringExpenses: [],
+        emergencyFund: { current: 0, monthsTarget: 3 },
+      };
 
     case "ADD_TRANSACTION": {
       const tx = { id: uid("tx"), ...action.payload };
@@ -99,7 +124,7 @@ function reducer(state, action) {
 }
 
 export function FinanceProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, null, () => loadState(STORAGE_KEY) || buildInitialState());
+  const [state, dispatch] = useReducer(reducer, null, () => loadState(STORAGE_KEY) || buildEmptyState());
 
   useEffect(() => {
     saveState(STORAGE_KEY, state);

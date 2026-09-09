@@ -84,6 +84,35 @@ export function getCategoryTrends(state) {
     .sort((a, b) => b.current - a.current);
 }
 
+// Distingue a un usuario que ya empezó a alimentar la app (aunque sea con
+// un solo movimiento o una sola cuenta) de uno recién configurado que
+// todavía no tiene nada registrado. Se usa para decidir si Inicio muestra
+// el resumen financiero o un estado vacío.
+export function hasFinancialData(state) {
+  return (
+    state.accounts.length > 0 ||
+    state.transactions.length > 0 ||
+    state.debts.length > 0 ||
+    state.goals.length > 0
+  );
+}
+
+// Estado del fondo de emergencia, calculado a partir de los gastos
+// esenciales reales del usuario. Se usa en Planes (a detalle) y en el
+// resumen de Inicio (una línea), para no duplicar la fórmula en dos sitios.
+export function getEmergencyFundStatus(state) {
+  const essentialCategoryIds = state.categories.filter((c) => c.essential).map((c) => c.id);
+  const essentialMonthly = getMonthTransactions(state, new Date(), "current")
+    .filter((t) => t.type === "gasto" && essentialCategoryIds.includes(t.category))
+    .reduce((s, t) => s + t.amount, 0);
+
+  const target = essentialMonthly * state.emergencyFund.monthsTarget;
+  const progresoPct = target > 0 ? Math.min(1, state.emergencyFund.current / target) : 0;
+  const faltante = Math.max(0, target - state.emergencyFund.current);
+
+  return { essentialMonthly, target, progresoPct, faltante };
+}
+
 export function getTotalDebtInstallments(state) {
   return state.debts.reduce((s, d) => s + d.installment, 0);
 }
@@ -100,10 +129,20 @@ export function projectBalance(state, days = 30) {
   const horizon = addDays(today, days);
   const events = getUpcomingCommitments(state, days).map((c) => ({ ...c, delta: -c.amount }));
 
-  // Ingreso esperado si el día de pago cae dentro del horizonte
-  const payDate = nextOccurrence(state.profile.payDay, today);
-  if (payDate <= horizon) {
-    events.push({ id: "ingreso-esperado", name: "Salario esperado", amount: state.profile.monthlyIncome, date: payDate, kind: "ingreso", delta: state.profile.monthlyIncome });
+  // Ingreso esperado si el día de pago cae dentro del horizonte (solo si el
+  // usuario configuró día de ingreso e ingreso mensual estimado).
+  if (state.profile.incomeDay && state.profile.estimatedMonthlyIncome > 0) {
+    const payDate = nextOccurrence(state.profile.incomeDay, today);
+    if (payDate <= horizon) {
+      events.push({
+        id: "ingreso-esperado",
+        name: "Ingreso esperado",
+        amount: state.profile.estimatedMonthlyIncome,
+        date: payDate,
+        kind: "ingreso",
+        delta: state.profile.estimatedMonthlyIncome,
+      });
+    }
   }
 
   events.sort((a, b) => a.date - b.date);

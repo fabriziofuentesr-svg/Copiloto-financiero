@@ -28,7 +28,31 @@ primera vez que abres la app. Desde ahí en adelante todo se persiste en
 `localStorage` del navegador (`src/services/storage.js`). Puedes reiniciar a
 los datos de ejemplo desde **Configuración → Reiniciar a datos de ejemplo**.
 
-## Qué se implementó en esta iteración (Fases 1, 2 y la mayor parte de 3)
+## Novedades de esta iteración: onboarding y perfil real
+
+- **Ya no se cargan datos ficticios al abrir la app.** Un usuario nuevo arranca
+  con `buildEmptyState()` (`src/data/mockData.js`): sin cuentas, sin
+  movimientos, sin deudas ni objetivos. Los datos de "Nicolás" siguen
+  existiendo como `buildDemoState()`, pero solo se cargan si el usuario lo
+  pide explícitamente desde **Configuración → Cargar datos de ejemplo**.
+- **Flujo de bienvenida** (`src/onboarding/`): Bienvenida → Configuración
+  inicial (nombre, moneda, situación laboral, ingreso mensual aproximado,
+  día de ingreso opcional) → Guía breve de 5 pasos (con progreso, Atrás,
+  Siguiente, Omitir y "Comenzar a usar la app"). Se muestra una sola vez,
+  controlada por `profile.onboardingCompleted` en el estado global.
+- El perfil se puede editar después desde **Configuración → Perfil**, y la
+  guía se puede volver a abrir desde **Configuración → Ayuda** (mismo
+  componente `GuideCarousel`, sin duplicar lógica).
+- **Inicio deja de ser un formulario.** Ya no tiene botones para registrar
+  ingresos/gastos/objetivos: solo quedan destacados "¿Puedo comprarlo?" y
+  "Preguntar al Copiloto", el resumen financiero (si ya hay datos) o un
+  estado vacío bien diseñado (si no), y una grilla "¿Qué puedes hacer?" con
+  las 5 secciones y un resumen en vivo de cada una.
+- El Copiloto y "¿Puedo permitírmelo?" ahora responden de forma explícita
+  cuando todavía no hay datos ("Registra tus ingresos y gastos...") en vez
+  de calcular una salud financiera falsa sobre un perfil vacío.
+
+## Qué se implementó en la iteración anterior (Fases 1, 2 y la mayor parte de 3)
 
 - Navegación real de 5 secciones (Inicio, Movimientos, Planes, Análisis,
   Copiloto) + secundarias (Cuentas, Configuración), sidebar en desktop y
@@ -57,7 +81,18 @@ los datos de ejemplo desde **Configuración → Reiniciar a datos de ejemplo**.
 - **¿Puedo permitírmelo?** y **Flujo de dinero**: herramientas standalone,
   accesibles desde acciones rápidas del dashboard.
 
-## Qué falta / simplificaciones conocidas de esta iteración
+## Verificación realizada (sin `npm install`, sin red en este entorno)
+
+No pude ejecutar `npm run build` real porque este entorno de desarrollo no
+tiene acceso a red para instalar dependencias. En su lugar verifiqué, con
+esbuild: (1) que cada archivo `.js`/`.jsx` compila sin errores de sintaxis,
+y (2) que un bundle completo desde `main.jsx` resuelve correctamente todos
+los imports internos (encontré y corregí un import roto de `AlertBanner` en
+la iteración anterior). Aun así, **ejecuta `npm install && npm run build`
+apenas lo descargues** para confirmarlo en un entorno real antes de
+desplegar.
+
+## Qué falta / simplificaciones conocidas
 
 - **Editar** movimientos, cuentas, objetivos y deudas: hoy solo hay alta y
   baja. Es lo primero que agregaría en la siguiente iteración.

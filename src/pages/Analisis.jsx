@@ -84,11 +84,18 @@ export default function Analisis() {
       </Card>
 
       <Card title="Insights">
-        <div className="flex flex-col gap-4">
-          {insights.map((i) => (
-            <InsightCard key={i.id} insight={i} />
-          ))}
-        </div>
+        {insights.length === 0 ? (
+          <p className="text-ink-soft text-sm">
+            Aún no hay suficientes movimientos para generar insights. Empieza registrando tus ingresos y gastos
+            desde Movimientos.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {insights.map((i) => (
+              <InsightCard key={i.id} insight={i} />
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

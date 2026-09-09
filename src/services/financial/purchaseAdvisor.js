@@ -4,6 +4,14 @@
 import { calculateAvailableMoney, calculateFinancialHealth, summarizeMonth } from "./calculations.js";
 
 export function evaluatePurchase(state, amount) {
+  if (state.accounts.length === 0) {
+    return {
+      verdict: "sin_datos",
+      label: "Todavía no tienes cuentas registradas",
+      explanation: "Agrega al menos una cuenta en la sección Cuentas para que pueda evaluar tus compras con datos reales.",
+    };
+  }
+
   const { available, totalBalance } = calculateAvailableMoney(state);
   const health = calculateFinancialHealth(state);
   const { ingresos } = summarizeMonth(state, "current");

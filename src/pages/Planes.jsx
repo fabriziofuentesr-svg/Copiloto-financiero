@@ -6,7 +6,7 @@ import { Card, Button, Modal, Field, Input, ProgressBar } from "../components/ui
 import { GoalCard, DebtCard } from "../components/finance/cards.jsx";
 import { estimateGoalCompletion } from "../services/financial/goals.js";
 import { compareExtraPayment, totalMonthlyInstallments } from "../services/financial/debts.js";
-import { getMonthTransactions } from "../services/financial/calculations.js";
+import { getEmergencyFundStatus } from "../services/financial/calculations.js";
 import { fmtBs, fmtPct } from "../services/financial/format.js";
 
 const TABS = [
@@ -138,14 +138,7 @@ function Objetivos({ autoOpen }) {
 function FondoEmergencia() {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
-  const essentialCategoryIds = state.categories.filter((c) => c.essential).map((c) => c.id);
-  const essentialMonthly = getMonthTransactions(state, new Date(), "current")
-    .filter((t) => t.type === "gasto" && essentialCategoryIds.includes(t.category))
-    .reduce((s, t) => s + t.amount, 0);
-
-  const target = essentialMonthly * state.emergencyFund.monthsTarget;
-  const progresoPct = target > 0 ? Math.min(1, state.emergencyFund.current / target) : 0;
-  const faltante = Math.max(0, target - state.emergencyFund.current);
+  const { essentialMonthly, target, progresoPct, faltante } = getEmergencyFundStatus(state);
 
   return (
     <Card>

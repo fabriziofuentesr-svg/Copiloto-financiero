@@ -2,7 +2,7 @@
 // palabras clave sobre los mismos datos financieros del usuario — no un
 // chatbot genérico. Está aislado para poder sustituirlo después por una
 // llamada real a la API de Claude sin tocar la UI del chat.
-import { calculateAvailableMoney, calculateFinancialHealth, summarizeMonth, getCategoryTrends, projectBalance } from "./calculations.js";
+import { calculateAvailableMoney, calculateFinancialHealth, summarizeMonth, getCategoryTrends, projectBalance, hasFinancialData } from "./calculations.js";
 import { evaluatePurchase } from "./purchaseAdvisor.js";
 import { estimateGoalCompletion } from "./goals.js";
 import { fmtBs, fmtPct } from "./format.js";
@@ -13,6 +13,10 @@ function extractAmount(text) {
 }
 
 export function answerQuestion(state, question) {
+  if (!hasFinancialData(state)) {
+    return "Todavía no tengo datos financieros tuyos. Registra tus ingresos y gastos en Movimientos (o agrega una cuenta en Cuentas) y podré darte respuestas basadas en tu situación real.";
+  }
+
   const q = question.toLowerCase();
   const { available } = calculateAvailableMoney(state);
   const health = calculateFinancialHealth(state);

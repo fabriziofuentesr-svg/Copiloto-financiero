@@ -104,12 +104,61 @@ export const EMERGENCY_FUND = {
   monthsTarget: 3,
 };
 
-export const PROFILE = {
+export const DEMO_PROFILE = {
   name: "Nicolás",
   currency: "BOB",
-  monthlyIncome: 4000,
-  payDay: 30,
+  employmentType: "dependiente",
+  estimatedMonthlyIncome: 4000,
+  incomeDay: 30,
+  onboardingCompleted: true,
 };
+
+// Perfil inicial de un usuario que todavía no configuró nada.
+export function buildEmptyProfile() {
+  return {
+    name: "",
+    currency: "BOB",
+    employmentType: "",
+    estimatedMonthlyIncome: 0,
+    incomeDay: null,
+    onboardingCompleted: false,
+  };
+}
+
+// Estado con el que arranca cualquier usuario nuevo: sin cuentas, sin
+// movimientos, sin deudas ni objetivos. Las categorías y métodos de pago
+// son configuración de referencia (no datos inventados del usuario), así
+// que sí vienen precargados.
+export function buildEmptyState() {
+  return {
+    profile: buildEmptyProfile(),
+    accounts: [],
+    transactions: [],
+    categories: CATEGORIES,
+    paymentMethods: PAYMENT_METHODS,
+    goals: [],
+    debts: [],
+    recurringExpenses: [],
+    emergencyFund: { current: 0, monthsTarget: 3 },
+  };
+}
+
+// Estado de demostración (datos ficticios de "Nicolás"), solo para que
+// alguien pueda explorar la app sin cargar sus propios datos. Nunca se
+// carga automáticamente: hay que pedirlo explícitamente desde Configuración.
+export function buildDemoState() {
+  return {
+    profile: DEMO_PROFILE,
+    accounts: ACCOUNTS,
+    transactions: TRANSACTIONS,
+    categories: CATEGORIES,
+    paymentMethods: PAYMENT_METHODS,
+    goals: GOALS,
+    debts: DEBTS,
+    recurringExpenses: RECURRING_EXPENSES,
+    emergencyFund: EMERGENCY_FUND,
+  };
+}
 
 // --- Transacciones ---------------------------------------------------------
 // Generadas en relación a "hoy" para que "este mes" / "mes pasado" siempre
@@ -159,17 +208,3 @@ function generateTransactions() {
 }
 
 export const TRANSACTIONS = generateTransactions();
-
-export function buildInitialState() {
-  return {
-    profile: PROFILE,
-    accounts: ACCOUNTS,
-    transactions: TRANSACTIONS,
-    categories: CATEGORIES,
-    paymentMethods: PAYMENT_METHODS,
-    goals: GOALS,
-    debts: DEBTS,
-    recurringExpenses: RECURRING_EXPENSES,
-    emergencyFund: EMERGENCY_FUND,
-  };
-}

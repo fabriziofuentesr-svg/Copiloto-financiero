@@ -17,8 +17,8 @@ export default function PuedoComprarlo() {
     setResultado(evaluatePurchase(state, Number(precio)));
   }
 
-  const emoji = resultado?.verdict === "si" ? "🟢" : resultado?.verdict === "precaucion" ? "🟡" : "🔴";
-  const level = resultado?.verdict === "si" ? "positive" : resultado?.verdict === "precaucion" ? "warning" : "danger";
+  const emoji = resultado?.verdict === "si" ? "🟢" : resultado?.verdict === "precaucion" ? "🟡" : resultado?.verdict === "sin_datos" ? "ℹ️" : "🔴";
+  const level = resultado?.verdict === "si" ? "positive" : resultado?.verdict === "precaucion" ? "warning" : resultado?.verdict === "sin_datos" ? "neutral" : "danger";
 
   return (
     <div className="flex flex-col gap-5 max-w-lg">
