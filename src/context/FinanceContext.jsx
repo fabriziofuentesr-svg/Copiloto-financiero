@@ -17,8 +17,27 @@ function reducer(state, action) {
 
     // Carga los datos de demostración. Se usa únicamente si el usuario lo
     // pide explícitamente desde Configuración; nunca al abrir la app.
-    case "LOAD_DEMO_DATA":
-      return buildDemoState();
+    case "LOAD_DEMO_DATA": {
+      const demo = buildDemoState();
+      const demoBackup = state.demoBackup || {
+        accounts: state.accounts,
+        transactions: state.transactions,
+        goals: state.goals,
+        debts: state.debts,
+        recurringExpenses: state.recurringExpenses,
+        emergencyFund: state.emergencyFund,
+      };
+      return {
+        ...demo,
+        profile: state.profile,
+        demoBackup,
+      };
+    }
+
+    case "RESTORE_USER_DATA":
+      return state.demoBackup
+        ? { ...state, ...state.demoBackup, demoBackup: null }
+        : state;
 
     // Completa el onboarding: guarda el perfil ingresado y marca
     // onboardingCompleted en true. A partir de aquí la app entra directo.
@@ -41,16 +60,20 @@ function reducer(state, action) {
         debts: [],
         recurringExpenses: [],
         emergencyFund: { current: 0, monthsTarget: 3 },
+        demoBackup: null,
       };
 
     case "ADD_TRANSACTION": {
-      const tx = { id: uid("tx"), ...action.payload };
-      const accounts = state.accounts.map((a) => {
+      const amount = Number(action.payload.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return state;
+      if (!(state.accounts || []).some((account) => account.id === action.payload.accountId)) return state;
+      const tx = { id: uid("tx"), ...action.payload, amount };
+      const accounts = (state.accounts || []).map((a) => {
         if (a.id !== tx.accountId) return a;
         const delta = tx.type === "ingreso" ? tx.amount : -tx.amount;
-        return { ...a, balance: a.balance + delta };
+        return { ...a, balance: (Number(a.balance) || 0) + delta };
       });
-      return { ...state, transactions: [tx, ...state.transactions], accounts };
+      return { ...state, transactions: [tx, ...(state.transactions || [])], accounts };
     }
 
     case "UPDATE_TRANSACTION": {
@@ -103,7 +126,14 @@ function reducer(state, action) {
     case "ADD_TO_GOAL":
       return {
         ...state,
-        goals: state.goals.map((g) => (g.id === action.payload.id ? { ...g, current: g.current + action.payload.amount } : g)),
+        goals: state.goals.map((g) => {
+          if (g.id !== action.payload.id) return g;
+          const amount = Number(action.payload.amount);
+          if (!Number.isFinite(amount) || amount <= 0) return g;
+          const target = Math.max(0, Number(g.target) || 0);
+          const current = Math.max(0, Number(g.current) || 0);
+          return { ...g, current: Math.min(target, current + amount) };
+        }),
       };
 
     case "ADD_DEBT":
@@ -115,8 +145,58 @@ function reducer(state, action) {
     case "DELETE_DEBT":
       return { ...state, debts: state.debts.filter((d) => d.id !== action.payload) };
 
+    case "PAY_DEBT": {
+      const debt = state.debts.find((d) => d.id === action.payload.id);
+      const amount = Number(action.payload.amount);
+      const account = state.accounts.find((a) => a.id === action.payload.accountId && a.type !== "tarjeta_credito");
+      if (!debt || !account || !Number.isFinite(amount) || amount <= 0) return state;
+      const payment = Math.min(
+        amount,
+        Math.max(0, Number(debt.balance) || 0),
+        Math.max(0, Number(account.balance) || 0)
+      );
+      if (payment <= 0) return state;
+      const date = new Date();
+      const dateValue =
+        date.getFullYear() +
+        "-" +
+        String(date.getMonth() + 1).padStart(2, "0") +
+        "-" +
+        String(date.getDate()).padStart(2, "0");
+      return {
+        ...state,
+        debts: state.debts.map((d) => (d.id === debt.id ? { ...d, balance: d.balance - payment } : d)),
+        accounts: state.accounts.map((a) => (a.id === account.id ? { ...a, balance: a.balance - payment } : a)),
+        transactions: [
+          {
+            id: uid("tx"),
+            description: "Pago de " + debt.name,
+            amount: payment,
+            date: dateValue,
+            category: "deudas",
+            accountId: account.id,
+            paymentMethod: "transferencia",
+            type: "gasto",
+          },
+          ...state.transactions,
+        ],
+      };
+    }
+
     case "SET_EMERGENCY_FUND":
       return { ...state, emergencyFund: { ...state.emergencyFund, ...action.payload } };
+
+    case "ADD_TO_EMERGENCY_FUND": {
+      const amount = Number(action.payload.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return state;
+      return {
+        ...state,
+        emergencyFund: {
+          ...(state.emergencyFund || { monthsTarget: 3 }),
+          current: Math.max(0, Number(state.emergencyFund?.current) || 0) + amount,
+        },
+      };
+    }
 
     default:
       return state;
@@ -148,3 +228,4 @@ export function useFinanceDispatch() {
   if (!ctx) throw new Error("useFinanceDispatch debe usarse dentro de <FinanceProvider>");
   return ctx;
 }
+

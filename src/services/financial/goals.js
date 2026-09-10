@@ -10,11 +10,16 @@ export function goalProgress(goal) {
 // el simulador ("¿qué pasa si ahorro Bs X al mes?").
 export function estimateGoalCompletion(goal, monthlyContribution = goal.monthlyContribution) {
   const { restante } = goalProgress(goal);
-  if (monthlyContribution <= 0) {
-    return { months: Infinity, date: null };
+  if (restante === 0) {
+    return { months: 0, date: new Date() };
   }
-  const months = Math.ceil(restante / monthlyContribution);
+  const contribution = Number(monthlyContribution);
+  if (!Number.isFinite(contribution) || contribution <= 0) {
+    return { months: null, date: null };
+  }
+  const months = Math.ceil(restante / contribution);
   const date = new Date();
   date.setMonth(date.getMonth() + months);
   return { months, date };
 }
+

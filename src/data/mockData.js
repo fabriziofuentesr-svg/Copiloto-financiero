@@ -140,6 +140,7 @@ export function buildEmptyState() {
     debts: [],
     recurringExpenses: [],
     emergencyFund: { current: 0, monthsTarget: 3 },
+    demoBackup: null,
   };
 }
 
@@ -157,6 +158,7 @@ export function buildDemoState() {
     debts: DEBTS,
     recurringExpenses: RECURRING_EXPENSES,
     emergencyFund: EMERGENCY_FUND,
+    demoBackup: null,
   };
 }
 
@@ -208,3 +210,4 @@ function generateTransactions() {
 }
 
 export const TRANSACTIONS = generateTransactions();
+
