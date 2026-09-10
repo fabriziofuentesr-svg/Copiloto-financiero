@@ -2,23 +2,34 @@
 // financiero y devuelven números/objetos, sin tocar React ni el DOM.
 import { addDays, isSameMonth, isPrevMonth, nextOccurrence, clamp } from "./format.js";
 
-export function getUpcomingCommitments(state, days = 30) {
-  const today = new Date();
-  const horizon = addDays(today, days);
+function addRecurringOccurrences(items, record, dayField, kind, today, horizon) {
+  if (kind === "deuda" && (Number(record.balance) || 0) <= 0) return;
+  let date = nextOccurrence(record[dayField], today);
+  let occurrence = 0;
+  while (date <= horizon && occurrence < 1200) {
+    items.push({
+      id: record.id,
+      name: record.name,
+      amount: Math.max(0, Number(record.amount ?? record.installment) || 0),
+      date,
+      kind,
+    });
+    occurrence += 1;
+    date = nextOccurrence(record[dayField], new Date(date.getFullYear(), date.getMonth() + 1, 1));
+  }
+}
+
+export function getUpcomingCommitments(state, days = 30, referenceDate = new Date()) {
+  const today = new Date(referenceDate);
+  const horizon = addDays(today, Math.max(0, Number(days) || 0));
   const items = [];
 
-  state.recurringExpenses.forEach((r) => {
-    const date = nextOccurrence(r.dayOfMonth, today);
-    if (date <= horizon) {
-      items.push({ id: r.id, name: r.name, amount: r.amount, date, kind: "gasto_fijo" });
-    }
+  (state.recurringExpenses || []).forEach((r) => {
+    addRecurringOccurrences(items, r, "dayOfMonth", "gasto_fijo", today, horizon);
   });
 
-  state.debts.forEach((d) => {
-    const date = nextOccurrence(d.paymentDay, today);
-    if (date <= horizon) {
-      items.push({ id: d.id, name: d.name, amount: d.installment, date, kind: "deuda" });
-    }
+  (state.debts || []).forEach((d) => {
+    addRecurringOccurrences(items, d, "paymentDay", "deuda", today, horizon);
   });
 
   return items.sort((a, b) => a.date - b.date);
@@ -27,21 +38,21 @@ export function getUpcomingCommitments(state, days = 30) {
 // Saldo total = solo cuentas que representan dinero propio disponible
 // (se excluye la tarjeta de crédito: su saldo negativo es deuda, no activo).
 export function getTotalBalance(state) {
-  return state.accounts
+  return (state.accounts || [])
     .filter((a) => a.type !== "tarjeta_credito")
-    .reduce((sum, a) => sum + a.balance, 0);
+    .reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
 }
 
 // "Dinero realmente disponible": saldo total menos los compromisos que
-// vencen antes de que llegue el próximo ingreso (aproximado a 30 días).
-export function calculateAvailableMoney(state) {
+// vencen en los próximos 30 días.
+export function calculateAvailableMoney(state, referenceDate = new Date()) {
   const totalBalance = getTotalBalance(state);
-  const committed = getUpcomingCommitments(state, 30).reduce((s, c) => s + c.amount, 0);
+  const committed = getUpcomingCommitments(state, 30, referenceDate).reduce((s, c) => s + c.amount, 0);
   return { totalBalance, committed, available: totalBalance - committed };
 }
 
 export function getMonthTransactions(state, ref = new Date(), which = "current") {
-  return state.transactions.filter((t) => {
+  return (state.transactions || []).filter((t) => {
     const inMonth = which === "current" ? isSameMonth(t.date, ref) : isPrevMonth(t.date, ref);
     return inMonth;
   });
@@ -49,8 +60,8 @@ export function getMonthTransactions(state, ref = new Date(), which = "current")
 
 export function summarizeMonth(state, which = "current") {
   const txs = getMonthTransactions(state, new Date(), which);
-  const ingresos = txs.filter((t) => t.type === "ingreso").reduce((s, t) => s + t.amount, 0);
-  const gastos = txs.filter((t) => t.type === "gasto").reduce((s, t) => s + t.amount, 0);
+  const ingresos = txs.filter((t) => t.type === "ingreso").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const gastos = txs.filter((t) => t.type === "gasto").reduce((s, t) => s + (Number(t.amount) || 0), 0);
   return { ingresos, gastos, ahorro: ingresos - gastos };
 }
 
@@ -58,7 +69,7 @@ export function summarizeByCategory(state, which = "current") {
   const txs = getMonthTransactions(state, new Date(), which).filter((t) => t.type === "gasto");
   const byCategory = {};
   txs.forEach((t) => {
-    byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+    byCategory[t.category] = (byCategory[t.category] || 0) + (Number(t.amount) || 0);
   });
   return Object.entries(byCategory)
     .map(([categoryId, amount]) => {
@@ -90,10 +101,10 @@ export function getCategoryTrends(state) {
 // el resumen financiero o un estado vacío.
 export function hasFinancialData(state) {
   return (
-    state.accounts.length > 0 ||
-    state.transactions.length > 0 ||
-    state.debts.length > 0 ||
-    state.goals.length > 0
+    (state.accounts || []).length > 0 ||
+    (state.transactions || []).length > 0 ||
+    (state.debts || []).length > 0 ||
+    (state.goals || []).length > 0
   );
 }
 
@@ -101,61 +112,70 @@ export function hasFinancialData(state) {
 // esenciales reales del usuario. Se usa en Planes (a detalle) y en el
 // resumen de Inicio (una línea), para no duplicar la fórmula en dos sitios.
 export function getEmergencyFundStatus(state) {
-  const essentialCategoryIds = state.categories.filter((c) => c.essential).map((c) => c.id);
+  const essentialCategoryIds = (state.categories || []).filter((c) => c.essential).map((c) => c.id);
   const essentialMonthly = getMonthTransactions(state, new Date(), "current")
     .filter((t) => t.type === "gasto" && essentialCategoryIds.includes(t.category))
-    .reduce((s, t) => s + t.amount, 0);
+    .reduce((s, t) => s + (Number(t.amount) || 0), 0);
 
-  const target = essentialMonthly * state.emergencyFund.monthsTarget;
-  const progresoPct = target > 0 ? Math.min(1, state.emergencyFund.current / target) : 0;
-  const faltante = Math.max(0, target - state.emergencyFund.current);
+  const current = Math.max(0, Number(state.emergencyFund?.current) || 0);
+  const monthsTarget = Math.max(1, Number(state.emergencyFund?.monthsTarget) || 3);
+  const target = essentialMonthly * monthsTarget;
+  const progresoPct = target > 0 ? Math.min(1, current / target) : 0;
+  const faltante = Math.max(0, target - current);
 
-  return { essentialMonthly, target, progresoPct, faltante };
+  return { essentialMonthly, target, progresoPct, faltante, current, monthsTarget, hasExpenses: essentialMonthly > 0 };
 }
 
 export function getTotalDebtInstallments(state) {
-  return state.debts.reduce((s, d) => s + d.installment, 0);
+  return (state.debts || [])
+    .filter((d) => (Number(d.balance) || 0) > 0)
+    .reduce((s, d) => s + (Number(d.installment) || 0), 0);
 }
 
 export function getTotalDebtBalance(state) {
-  return state.debts.reduce((s, d) => s + d.balance, 0);
+  return (state.debts || []).reduce((s, d) => s + (Number(d.balance) || 0), 0);
 }
 
-// Proyección simple a N días: saldo disponible menos los compromisos que
-// vencen dentro de ese horizonte, sumando ingresos recurrentes esperados.
-export function projectBalance(state, days = 30) {
-  const { available } = calculateAvailableMoney(state);
-  const today = new Date();
-  const horizon = addDays(today, days);
-  const events = getUpcomingCommitments(state, days).map((c) => ({ ...c, delta: -c.amount }));
+// Proyección simple a N días: parte del saldo actual, aplica cada compromiso
+// que vence dentro del horizonte y suma los ingresos recurrentes esperados.
+export function projectBalance(state, days = 30, referenceDate = new Date()) {
+  const today = new Date(referenceDate);
+  const totalBalance = getTotalBalance(state);
+  const horizon = addDays(today, Math.max(0, Number(days) || 0));
+  const events = getUpcomingCommitments(state, days, today).map((c) => ({ ...c, delta: -c.amount }));
 
-  // Ingreso esperado si el día de pago cae dentro del horizonte (solo si el
-  // usuario configuró día de ingreso e ingreso mensual estimado).
-  if (state.profile.incomeDay && state.profile.estimatedMonthlyIncome > 0) {
-    const payDate = nextOccurrence(state.profile.incomeDay, today);
-    if (payDate <= horizon) {
+  // Añade cada ingreso mensual que cae dentro del horizonte, no solo el
+  // primero. Así una proyección de 180 días incluye todos sus cobros.
+  if (state.profile?.incomeDay && Number(state.profile.estimatedMonthlyIncome) > 0) {
+    let payDate = nextOccurrence(state.profile.incomeDay, today);
+    let occurrence = 0;
+    while (payDate <= horizon && occurrence < 1200) {
       events.push({
-        id: "ingreso-esperado",
+        id: "ingreso-esperado-" + occurrence,
         name: "Ingreso esperado",
-        amount: state.profile.estimatedMonthlyIncome,
+        amount: Number(state.profile.estimatedMonthlyIncome),
         date: payDate,
         kind: "ingreso",
-        delta: state.profile.estimatedMonthlyIncome,
+        delta: Number(state.profile.estimatedMonthlyIncome),
       });
+      occurrence += 1;
+      payDate = nextOccurrence(state.profile.incomeDay, new Date(payDate.getFullYear(), payDate.getMonth() + 1, 1));
     }
   }
 
   events.sort((a, b) => a.date - b.date);
 
-  let running = available;
+  // El saldo inicial es el total de cuentas. Cada compromiso aparece una sola
+  // vez en la línea de tiempo, evitando descontarlo también antes de empezar.
+  let running = totalBalance;
   const timeline = events.map((e) => {
     running += e.delta;
     return { ...e, balanceAfter: running };
   });
 
-  const minPoint = timeline.reduce((min, e) => (e.balanceAfter < min ? e.balanceAfter : min), available);
+  const minPoint = timeline.reduce((min, e) => (e.balanceAfter < min ? e.balanceAfter : min), totalBalance);
 
-  return { start: available, end: running, timeline, minPoint, atRisk: minPoint < 0 };
+  return { start: totalBalance, end: running, timeline, minPoint, atRisk: minPoint < 0 };
 }
 
 // --- Salud financiera --------------------------------------------------
@@ -166,18 +186,34 @@ export function calculateFinancialHealth(state) {
   const { totalBalance, committed, available } = calculateAvailableMoney(state);
   const { ingresos, gastos } = summarizeMonth(state, "current");
   const cuotas = getTotalDebtInstallments(state);
-  const dti = ingresos > 0 ? cuotas / ingresos : 0;
-  const tasaAhorro = ingresos > 0 ? (ingresos - gastos - cuotas) / ingresos : 0;
+  const hasIncome = ingresos > 0;
+  const dti = hasIncome ? cuotas / ingresos : null;
+  const tasaAhorro = hasIncome ? (ingresos - gastos - cuotas) / ingresos : null;
   const gastoTotalMensual = gastos + cuotas;
   const liquidezDias = gastoTotalMensual > 0 ? (available / gastoTotalMensual) * 30 : 0;
 
   // Cada componente se calcula en su propia escala 0-100 (20% de peso cada
   // uno sobre el total, que es simplemente su promedio).
   const liquidez = clamp((available / Math.max(1, committed || totalBalance * 0.5)) * 100, 0, 100);
-  const ahorro = clamp((tasaAhorro / 0.2) * 100, 0, 100);
-  const gastosScore = clamp(100 - clamp((gastos - ingresos * 0.5) / (ingresos * 0.5 || 1), 0, 1) * 100, 0, 100);
-  const endeudamiento = dti <= 0.15 ? 100 : dti >= 0.5 ? 0 : clamp(100 * (1 - (dti - 0.15) / 0.35), 0, 100);
-  const estabilidad = clamp((liquidezDias / 30) * 100, 0, 100);
+  // Sin ingresos registrados no se puede calificar ahorro, gastos o deuda
+  // como excelentes. Usamos un valor neutro o de riesgo cuando hay deuda,
+  // evitando recomendaciones engañosas por falta de datos.
+  const ahorro = hasIncome ? clamp((tasaAhorro / 0.2) * 100, 0, 100) : 50;
+  const gastosScore = hasIncome
+    ? clamp(100 - clamp((gastos - ingresos * 0.5) / (ingresos * 0.5 || 1), 0, 1) * 100, 0, 100)
+    : gastos > 0
+      ? 0
+      : 50;
+  const endeudamiento = hasIncome
+    ? dti <= 0.15
+      ? 100
+      : dti >= 0.5
+        ? 0
+        : clamp(100 * (1 - (dti - 0.15) / 0.35), 0, 100)
+    : cuotas > 0
+      ? 0
+      : 50;
+  const estabilidad = gastoTotalMensual > 0 ? clamp((liquidezDias / 30) * 100, 0, 100) : 50;
 
   const breakdown = {
     liquidez: Math.round(liquidez),
@@ -201,3 +237,4 @@ export function calculateFinancialHealth(state) {
 
   return { score, breakdown, resumen, dti, tasaAhorro, liquidezDias };
 }
+
