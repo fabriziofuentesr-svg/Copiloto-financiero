@@ -8,6 +8,7 @@ import { estimateGoalCompletion } from "../services/financial/goals.js";
 import { compareExtraPayment, totalMonthlyInstallments } from "../services/financial/debts.js";
 import { getEmergencyFundStatus } from "../services/financial/calculations.js";
 import { fmtBs, fmtPct } from "../services/financial/format.js";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 
 const TABS = [
   { id: "objetivos", label: "Objetivos" },
@@ -40,6 +41,7 @@ export default function Planes() {
       {tab === "objetivos" && <Objetivos autoOpen={Boolean(params.get("nuevo"))} />}
       {tab === "emergencia" && <FondoEmergencia />}
       {tab === "deudas" && <Deudas />}
+      <SectionGuide section="plans" />
     </div>
   );
 }
@@ -212,7 +214,7 @@ function FondoEmergencia() {
             key={m}
             size="sm"
             variant={(state.emergencyFund?.monthsTarget || 3) === m ? "primary" : "secondary"}
-            onClick={() => dispatch({ type: "SET_EMERGENCY_FUND", payload: { monthsTarget: m } })}
+            onClick={() => dispatch({ type: "SET_EMERGENCY_FUND", payload: { monthsTarget: m, configured: true } })}
           >
             {m} meses
           </Button>
@@ -398,4 +400,3 @@ function Deudas() {
     </div>
   );
 }
-
