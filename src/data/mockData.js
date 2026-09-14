@@ -37,7 +37,6 @@ export const PAYMENT_METHODS = [
 ];
 
 export const ACCOUNT_TYPES = [
-  { id: "banco", name: "Banco" },
   { id: "efectivo", name: "Efectivo" },
   { id: "ahorro", name: "Cuenta de ahorro" },
   { id: "tarjeta_credito", name: "Tarjeta de crédito" },
@@ -102,6 +101,7 @@ export const GOALS = [
 export const EMERGENCY_FUND = {
   current: 1400,
   monthsTarget: 3,
+  configured: true,
 };
 
 export const DEMO_PROFILE = {
@@ -109,7 +109,6 @@ export const DEMO_PROFILE = {
   currency: "BOB",
   employmentType: "dependiente",
   estimatedMonthlyIncome: 4000,
-  incomeDay: 30,
   onboardingCompleted: true,
 };
 
@@ -120,7 +119,6 @@ export function buildEmptyProfile() {
     currency: "BOB",
     employmentType: "",
     estimatedMonthlyIncome: 0,
-    incomeDay: null,
     onboardingCompleted: false,
   };
 }
@@ -139,7 +137,16 @@ export function buildEmptyState() {
     goals: [],
     debts: [],
     recurringExpenses: [],
-    emergencyFund: { current: 0, monthsTarget: 3 },
+    emergencyFund: { current: 0, monthsTarget: 3, configured: false },
+    financialSettings: {
+      essentialExpensesConfigured: false,
+      essentialCategoryIds: [],
+      savingsTargetType: "percentage",
+      savingsTargetValue: null,
+      debtStatus: "unconfigured",
+      projection: { expectedMonthlyIncome: null, expectedVariableExpenses: null },
+    },
+    sectionGuidesSeen: {},
     demoBackup: null,
   };
 }
@@ -158,6 +165,15 @@ export function buildDemoState() {
     debts: DEBTS,
     recurringExpenses: RECURRING_EXPENSES,
     emergencyFund: EMERGENCY_FUND,
+    financialSettings: {
+      essentialExpensesConfigured: true,
+      essentialCategoryIds: CATEGORIES.filter((category) => category.essential).map((category) => category.id),
+      savingsTargetType: "amount",
+      savingsTargetValue: 650,
+      debtStatus: "has_debt",
+      projection: { expectedMonthlyIncome: 4000, expectedVariableExpenses: 550 },
+    },
+    sectionGuidesSeen: {},
     demoBackup: null,
   };
 }
@@ -210,4 +226,3 @@ function generateTransactions() {
 }
 
 export const TRANSACTIONS = generateTransactions();
-
