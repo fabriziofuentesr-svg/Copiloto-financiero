@@ -27,12 +27,14 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
   function submit(e) {
     e.preventDefault();
     if (!form.name.trim()) return;
+    const income = Number(form.estimatedMonthlyIncome);
+    const incomeDay = Number(form.incomeDay);
     onSubmit({
       name: form.name.trim(),
       currency: form.currency,
       employmentType: form.employmentType,
-      estimatedMonthlyIncome: Number(form.estimatedMonthlyIncome) || 0,
-      incomeDay: form.incomeDay ? Number(form.incomeDay) : null,
+      estimatedMonthlyIncome: Number.isFinite(income) ? Math.max(0, income) : 0,
+      incomeDay: form.incomeDay && Number.isFinite(incomeDay) ? Math.min(31, Math.max(1, incomeDay)) : null,
     });
   }
 
@@ -56,9 +58,11 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
           ))}
         </Select>
       </Field>
-      <Field label="Ingreso mensual aproximado (Bs)">
+      <Field label={"Ingreso mensual aproximado (" + (form.currency === "USD" ? "USD" : "Bs") + ")"}>
         <Input
           type="number"
+          min="0"
+          step="0.01"
           value={form.estimatedMonthlyIncome}
           onChange={(e) => setForm({ ...form, estimatedMonthlyIncome: e.target.value })}
           placeholder="Ej. 4000"
@@ -68,7 +72,7 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
         <Input
           type="number"
           min="1"
-          max="28"
+          max="31"
           value={form.incomeDay}
           onChange={(e) => setForm({ ...form, incomeDay: e.target.value })}
           placeholder="Ej. 30"
@@ -79,7 +83,7 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
   );
 }
 
-export function ProfileSetup({ initialValues, onComplete }) {
+export function ProfileSetup({ initialValues, onBack, onComplete }) {
   return (
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
       <Card className="w-full max-w-md" title="Cuéntanos un poco de ti">
@@ -88,7 +92,11 @@ export function ProfileSetup({ initialValues, onComplete }) {
           adelante, desde sus propias secciones.
         </p>
         <ProfileForm initialValues={initialValues} submitLabel="Continuar" onSubmit={onComplete} />
+        {onBack ? (
+          <Button variant="ghost" className="w-full mt-2" onClick={onBack}>Atrás</Button>
+        ) : null}
       </Card>
     </div>
   );
 }
+
