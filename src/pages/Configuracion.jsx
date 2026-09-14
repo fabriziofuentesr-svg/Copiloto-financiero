@@ -5,6 +5,9 @@ import { Card, Button, Modal } from "../components/ui/primitives.jsx";
 import { ProfileForm } from "../onboarding/ProfileSetup.jsx";
 import { GuideCarousel } from "../onboarding/GuideCarousel.jsx";
 import { SectionGuide } from "../components/SectionGuide.jsx";
+import { Link } from "react-router-dom";
+import { hasFinancialData } from "../services/financial/calculations.js";
+import { fmtBs } from "../services/financial/format.js";
 
 const EMPLOYMENT_LABELS = {
   dependiente: "Dependiente (sueldo fijo)",
@@ -29,7 +32,16 @@ export default function Configuracion() {
             initialValues={state.profile}
             submitLabel="Guardar cambios"
             onSubmit={(data) => {
-              dispatch({ type: "UPDATE_PROFILE", payload: data });
+              const currencyChanged = data.currency !== state.profile.currency;
+              if (currencyChanged && hasFinancialData(state)) {
+                const accepted = window.confirm(`Cambiarás la moneda principal de ${state.profile.currency} a ${data.currency} sin convertir los importes existentes. Los valores conservarán su número y quedará un registro del cambio. ¿Continuar?`);
+                if (!accepted) return;
+                const { currency, ...profileData } = data;
+                dispatch({ type: "UPDATE_PROFILE", payload: profileData });
+                dispatch({ type: "CHANGE_CURRENCY_WITHOUT_CONVERSION", payload: { currency } });
+              } else {
+                dispatch({ type: "UPDATE_PROFILE", payload: data });
+              }
               setEditando(false);
             }}
           />
@@ -40,10 +52,15 @@ export default function Configuracion() {
             <Row label="Situación laboral" value={EMPLOYMENT_LABELS[state.profile.employmentType] || "No especificado"} />
             <Row
               label="Ingreso mensual aproximado"
-              value={state.profile.estimatedMonthlyIncome ? `${state.profile.currency === "USD" ? "USD" : "Bs"} ${state.profile.estimatedMonthlyIncome}` : "No especificado"}
+              value={state.profile.estimatedMonthlyIncome ? `${fmtBs(state.profile.estimatedMonthlyIncome, state.profile.currency)} (estimación, no movimiento)` : "No especificado"}
             />
           </div>
         )}
+      </Card>
+
+      <Card title="Cuentas y saldos">
+        <p className="text-sm text-ink-soft mb-3">Edita cuentas, tarjetas y registra ajustes de saldo con historial.</p>
+        <Link to="/cuentas" className="text-ochre text-sm underline">Administrar cuentas</Link>
       </Card>
 
       <Card title="Ayuda">

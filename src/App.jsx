@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Navigate, Routes, Route } from "react-router-dom";
 import { useFinanceState } from "./context/FinanceContext.jsx";
 import { OnboardingFlow } from "./onboarding/OnboardingFlow.jsx";
 import { AppShell } from "./layout/AppShell.jsx";
@@ -35,8 +35,9 @@ export default function App() {
         <Route path="/puedo-comprarlo" element={<PuedoComprarlo />} />
         <Route path="/flujo-de-dinero" element={<FlujoDeDinero />} />
         <Route path="/configuracion" element={<Configuracion />} />
+        <Route path="/onboarding" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );
 }
-

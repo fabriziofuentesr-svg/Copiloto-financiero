@@ -44,17 +44,12 @@ export function GuideCarousel({ onFinish, onSkip, onBackStart, includeIntroducti
   const isLast = step === visibleSteps.length - 1;
   const current = visibleSteps[step];
   const Icon = current.icon;
-  const displayedStep = includeIntroduction ? step : step + 1;
+  const displayedStep = step + 1;
 
   return (
     <div className="flex flex-col items-center text-center gap-5 py-2">
       <div className="flex gap-1.5">
-        {STEPS.map((_, i) => {
-          const activeIndex = includeIntroduction ? step : step + 1;
-          return (
-          <span key={i} className={`h-1.5 rounded-full transition-all ${i === activeIndex ? "w-6 bg-ochre" : "w-1.5 bg-paper-raised"}`} />
-          );
-        })}
+        {visibleSteps.map((item, i) => <span key={item.title} className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-ochre" : "w-1.5 bg-paper-raised"}`} />)}
       </div>
 
       <div className="w-14 h-14 rounded-full bg-teal/10 flex items-center justify-center">
@@ -63,7 +58,7 @@ export function GuideCarousel({ onFinish, onSkip, onBackStart, includeIntroducti
 
       <div>
         <div className="text-xs text-ink-soft mb-1">
-          {current.introduction ? "Introducción · 1 de 6" : `Paso ${displayedStep} de 5`}
+          {`Paso ${displayedStep} de ${visibleSteps.length}`}
         </div>
         <h3 className="font-display text-xl font-semibold">{current.title}</h3>
         <p className="text-ink-soft text-sm mt-2 max-w-sm">{current.text}</p>

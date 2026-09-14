@@ -43,6 +43,24 @@ export function fmtFecha(date) {
   return new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short" }).format(d);
 }
 
+export function localDateString(date = new Date()) {
+  const d = parseDate(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function endOfMonth(date = new Date()) {
+  const d = parseDate(date);
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+export function daysBetweenInclusive(start, end) {
+  const startDate = parseDate(start);
+  const endDate = parseDate(end);
+  const startUtc = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const endUtc = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  return Math.max(0, Math.round((endUtc - startUtc) / 86400000) + 1);
+}
+
 export function addDays(date, days) {
   const d = parseDate(date);
   d.setDate(d.getDate() + days);
