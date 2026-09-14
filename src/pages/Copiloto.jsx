@@ -3,6 +3,7 @@ import { Send, Bot, User } from "lucide-react";
 import { useFinanceState } from "../context/FinanceContext.jsx";
 import { Card, Input, Button } from "../components/ui/primitives.jsx";
 import { answerQuestion } from "../services/financial/copilotEngine.js";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 
 const SUGERENCIAS = [
   "¿Puedo comprar un celular de Bs 3.500?",
@@ -79,6 +80,7 @@ export default function Copiloto() {
         Estas respuestas se generan con reglas sobre tus datos reales, todavía sin un modelo de IA conectado. La
         arquitectura (services/financial/copilotEngine.js) está lista para enchufar un modelo real más adelante.
       </p>
+      <SectionGuide section="copilot" />
     </div>
   );
 }
