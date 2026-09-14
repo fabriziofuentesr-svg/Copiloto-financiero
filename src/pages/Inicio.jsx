@@ -29,6 +29,8 @@ export default function Inicio() {
   const state = useFinanceState();
   const navigate = useNavigate();
   const conDatos = hasFinancialData(state);
+  const hasAccounts = state.accounts.length > 0;
+  const hasTransactions = state.transactions.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -53,7 +55,11 @@ export default function Inicio() {
         />
       </div>
 
-      {conDatos ? <ResumenFinanciero state={state} /> : <EstadoVacio navigate={navigate} />}
+      {!hasAccounts || !hasTransactions ? (
+        <EstadosIniciales hasAccounts={hasAccounts} hasTransactions={hasTransactions} navigate={navigate} />
+      ) : null}
+
+      {conDatos ? <ResumenFinanciero state={state} /> : null}
 
       <QuePuedesHacer state={state} navigate={navigate} conDatos={conDatos} />
     </div>
@@ -77,19 +83,29 @@ function AccesoDestacado({ icon: Icon, title, text, onClick }) {
   );
 }
 
-function EstadoVacio({ navigate }) {
+function EstadosIniciales({ hasAccounts, hasTransactions, navigate }) {
   return (
-    <Card className="text-center py-10">
-      <p className="font-display text-lg font-semibold">Todavía no tienes datos financieros registrados</p>
-      <p className="text-ink-soft text-sm mt-2 max-w-md mx-auto">
-        Registra tu primer ingreso o gasto, o agrega una cuenta, para que el Copiloto pueda entender tu situación y
-        empezar a ayudarte.
-      </p>
-      <div className="flex gap-2 justify-center mt-5">
-        <Button onClick={() => navigate("/movimientos")}>Ir a Movimientos</Button>
-        <Button variant="secondary" onClick={() => navigate("/cuentas")}>Ir a Cuentas</Button>
-      </div>
-    </Card>
+    <div className="grid sm:grid-cols-2 gap-4">
+      {!hasAccounts ? (
+        <Card>
+          <p className="font-display text-lg font-semibold">Todavía no tienes cuentas configuradas</p>
+          <p className="text-ink-soft text-sm mt-2">Añade dónde guardas tu dinero para conocer tu saldo total.</p>
+          <Button className="mt-4" onClick={() => navigate("/cuentas")}>Añadir cuenta</Button>
+        </Card>
+      ) : null}
+      {!hasTransactions ? (
+        <Card>
+          <p className="font-display text-lg font-semibold">No tienes movimientos todavía</p>
+          <p className="text-ink-soft text-sm mt-2">
+            Registra tu primer ingreso o gasto para comenzar a entender tus finanzas.
+          </p>
+          <Button className="mt-4" disabled={!hasAccounts} onClick={() => navigate("/movimientos?nuevo=ingreso")}>
+            Registrar movimiento
+          </Button>
+          {!hasAccounts ? <p className="text-ink-soft text-xs mt-2">Primero necesitas añadir una cuenta.</p> : null}
+        </Card>
+      ) : null}
+    </div>
   );
 }
 
@@ -122,37 +138,37 @@ function ResumenFinanciero({ state }) {
         </Card>
 
         <Card title="Dinero disponible">
-          <div className="font-display text-3xl font-semibold text-teal">{fmtBs(available)}</div>
+          <div className="font-display text-3xl font-semibold text-teal">{fmtBs(available, state.profile.currency)}</div>
           <p className="text-ink-soft text-xs mt-1">Esto no es lo mismo que tu saldo total.</p>
           <div className="mt-4 flex flex-col gap-2 text-sm">
             <div className="flex justify-between leader-dotted pb-1.5">
               <span className="text-ink-soft">Saldo total</span>
-              <span className="tabular-nums">{fmtBs(totalBalance)}</span>
+              <span className="tabular-nums">{fmtBs(totalBalance, state.profile.currency)}</span>
             </div>
             <div className="flex justify-between leader-dotted pb-1.5">
               <span className="text-ink-soft">Comprometido (próx. 30 días)</span>
-              <span className="tabular-nums">− {fmtBs(committed)}</span>
+              <span className="tabular-nums">− {fmtBs(committed, state.profile.currency)}</span>
             </div>
             <div className="flex justify-between font-medium">
               <span>Disponible</span>
-              <span className="tabular-nums">{fmtBs(available)}</span>
+              <span className="tabular-nums">{fmtBs(available, state.profile.currency)}</span>
             </div>
           </div>
         </Card>
 
         <Card title="Resumen mensual">
           <div className="flex flex-col gap-2 text-sm">
-            <Row label="Ingresos" value={thisMonth.ingresos} prev={lastMonth.ingresos} />
-            <Row label="Gastos" value={thisMonth.gastos} prev={lastMonth.gastos} invert />
-            <Row label="Ahorro" value={thisMonth.ahorro} prev={lastMonth.ahorro} />
+            <Row label="Ingresos" value={thisMonth.ingresos} prev={lastMonth.ingresos} currency={state.profile.currency} />
+            <Row label="Gastos" value={thisMonth.gastos} prev={lastMonth.gastos} invert currency={state.profile.currency} />
+            <Row label="Ahorro" value={thisMonth.ahorro} prev={lastMonth.ahorro} currency={state.profile.currency} />
           </div>
         </Card>
 
         <Card title="Proyección de fin de mes">
-          <div className="font-display text-3xl font-semibold">{fmtBs(projection.end)}</div>
+          <div className="font-display text-3xl font-semibold">{fmtBs(projection.end, state.profile.currency)}</div>
           <p className="text-ink-soft text-sm mt-1">
             Con tus ingresos y gastos actuales, esperamos que en 30 días tu saldo disponible ronde los{" "}
-            {fmtBs(projection.end)}.
+            {fmtBs(projection.end, state.profile.currency)}.
           </p>
           <Link to="/flujo-de-dinero" className="text-ochre text-xs underline mt-2 inline-block">
             Ver flujo de dinero completo
@@ -166,7 +182,7 @@ function ResumenFinanciero({ state }) {
             <div key={c.id + c.date} className="flex justify-between py-2 border-b border-dotted border-line last:border-none text-sm">
               <span>{c.name}</span>
               <span className="text-ink-soft">{fmtFecha(c.date)}</span>
-              <span className="tabular-nums">− {fmtBs(c.amount)}</span>
+              <span className="tabular-nums">− {fmtBs(c.amount, state.profile.currency)}</span>
             </div>
           ))}
           {commitments.length === 0 && <p className="text-ink-soft text-sm">No hay compromisos próximos registrados.</p>}
@@ -260,21 +276,22 @@ function QuePuedesHacer({ state, navigate, conDatos }) {
   );
 }
 
-function Row({ label, value, prev, invert = false }) {
+function Row({ label, value, prev, invert = false, currency = "BOB" }) {
   const diff = value - prev;
   const improved = invert ? diff < 0 : diff > 0;
   return (
     <div className="flex justify-between items-baseline leader-dotted pb-1.5">
       <span className="text-ink-soft">{label}</span>
       <span className="tabular-nums">
-        {fmtBs(value)}{" "}
+        {fmtBs(value, currency)}{" "}
         {prev > 0 && (
           <span className={`text-xs ${improved ? "text-teal" : "text-brick"}`}>
             ({diff >= 0 ? "+" : ""}
-            {fmtBs(diff)} vs mes ant.)
+            {fmtBs(diff, currency)} vs mes ant.)
           </span>
         )}
       </span>
     </div>
   );
 }
+
