@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, Plus, ReceiptText, WalletCards } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, CheckCircle2, Plus, WalletCards } from "lucide-react";
 import { useFinanceState } from "../context/FinanceContext.jsx";
 import { AccountForm } from "../components/finance/AccountForm.jsx";
 import { TransactionForm } from "../components/finance/TransactionForm.jsx";
@@ -8,9 +8,11 @@ import { fmtBs } from "../services/financial/format.js";
 
 export function FinancialSetup({ onBack, onContinue }) {
   const state = useFinanceState();
-  const [panel, setPanel] = useState(state.accounts.length ? "movement" : "account");
+  const [panel, setPanel] = useState(state.accounts.length ? "income" : "account");
   const hasAccount = state.accounts.length > 0;
-  const hasMovement = state.transactions.length > 0;
+  const incomeCount = state.transactions.filter((transaction) => transaction.type === "ingreso").length;
+  const expenseCount = state.transactions.filter((transaction) => transaction.type === "gasto").length;
+  const hasMovement = incomeCount + expenseCount > 0;
 
   return (
     <div className="min-h-screen px-4 sm:px-6 py-8 sm:py-12">
@@ -24,7 +26,7 @@ export function FinancialSetup({ onBack, onContinue }) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid sm:grid-cols-3 gap-3 mb-4">
           <ProgressCard
             icon={WalletCards}
             title="Cuentas y saldos"
@@ -34,12 +36,20 @@ export function FinancialSetup({ onBack, onContinue }) {
             onClick={() => setPanel("account")}
           />
           <ProgressCard
-            icon={ReceiptText}
-            title="Primeros movimientos"
-            detail={hasMovement ? `${state.transactions.length} movimiento(s) registrado(s)` : "Registra un ingreso o gasto"}
-            complete={hasMovement}
-            active={panel === "movement"}
-            onClick={() => setPanel("movement")}
+            icon={ArrowUpCircle}
+            title="Primeros ingresos"
+            detail={incomeCount ? `${incomeCount} ingreso(s) registrado(s)` : "Registra un ingreso"}
+            complete={incomeCount > 0}
+            active={panel === "income"}
+            onClick={() => setPanel("income")}
+          />
+          <ProgressCard
+            icon={ArrowDownCircle}
+            title="Primeros gastos"
+            detail={expenseCount ? `${expenseCount} gasto(s) registrado(s)` : "Registra un gasto"}
+            complete={expenseCount > 0}
+            active={panel === "expense"}
+            onClick={() => setPanel("expense")}
           />
         </div>
 
@@ -49,7 +59,7 @@ export function FinancialSetup({ onBack, onContinue }) {
               <div>
                 <h2 className="font-display text-lg font-semibold">Añade una cuenta</h2>
                 <p className="text-ink-soft text-sm mt-1 mb-4">Indica dónde tienes tu dinero y cuál es su saldo actual.</p>
-                <AccountForm submitLabel="+ Añadir cuenta" onSuccess={() => setPanel("movement")} />
+                <AccountForm submitLabel="+ Añadir cuenta" onSuccess={() => setPanel("income")} />
               </div>
               <div className="border-t md:border-t-0 md:border-l border-line pt-5 md:pt-0 md:pl-6">
                 <h3 className="font-medium text-sm">Tus cuentas</h3>
@@ -65,20 +75,28 @@ export function FinancialSetup({ onBack, onContinue }) {
                 </div>
               </div>
             </div>
+          ) : panel === "income" ? (
+            <div>
+              <h2 className="font-display text-lg font-semibold">Registra tus primeros ingresos</h2>
+              <p className="text-ink-soft text-sm mt-1 mb-4">
+                Empieza con tu ingreso más habitual. Podrás añadir otros ahora o más adelante.
+              </p>
+              <TransactionForm initialType="ingreso" lockType submitLabel="Registrar ingreso" onSuccess={() => setPanel("expense")} />
+            </div>
           ) : (
             <div>
-              <h2 className="font-display text-lg font-semibold">Registra tus primeros movimientos</h2>
+              <h2 className="font-display text-lg font-semibold">Registra tus primeros gastos</h2>
               <p className="text-ink-soft text-sm mt-1 mb-4">
-                Puedes añadir varios ingresos y gastos. Todos aparecerán después en Movimientos.
+                Añade uno o varios gastos importantes para comenzar a entender cómo utilizas tu dinero.
               </p>
-              <TransactionForm submitLabel="Registrar movimiento" />
-              {hasAccount && (
-                <Button variant="ghost" size="sm" className="mt-3" onClick={() => setPanel("account")}>
-                  <Plus size={14} /> Añadir otra cuenta
-                </Button>
-              )}
+              <TransactionForm initialType="gasto" lockType submitLabel="Registrar gasto" />
             </div>
           )}
+          {hasAccount && panel !== "account" ? (
+            <Button variant="ghost" size="sm" className="mt-3" onClick={() => setPanel("account")}>
+              <Plus size={14} /> Añadir otra cuenta
+            </Button>
+          ) : null}
         </Card>
 
         <p className="text-center text-xs text-ink-soft mt-4">
