@@ -38,7 +38,7 @@ export function FinancialScoreGauge({ score, size = 96 }) {
           style={{ transition: "stroke-dashoffset 0.5s ease" }}
         />
         <text x="50%" y="52%" textAnchor="middle" fontSize="22" fontFamily="Lora, serif" fontWeight="600" fill="#22302C">
-          {score}
+          {score}%
         </text>
       </svg>
       <div>
