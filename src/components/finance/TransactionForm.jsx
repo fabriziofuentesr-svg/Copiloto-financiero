@@ -21,7 +21,7 @@ function buildInitialForm(state, type) {
   };
 }
 
-export function TransactionForm({ initialType = "gasto", onSuccess, submitLabel = "Guardar" }) {
+export function TransactionForm({ initialType = "gasto", lockType = false, onSuccess, submitLabel = "Guardar" }) {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
   const [form, setForm] = useState(() => buildInitialForm(state, initialType));
@@ -59,14 +59,16 @@ export function TransactionForm({ initialType = "gasto", onSuccess, submitLabel 
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-2" role="group" aria-label="Tipo de movimiento">
-        <Button type="button" variant={form.type === "ingreso" ? "primary" : "secondary"} onClick={() => changeType("ingreso")}>
-          Ingreso
-        </Button>
-        <Button type="button" variant={form.type === "gasto" ? "primary" : "secondary"} onClick={() => changeType("gasto")}>
-          Gasto
-        </Button>
-      </div>
+      {!lockType ? (
+        <div className="grid grid-cols-2 gap-2" role="group" aria-label="Tipo de movimiento">
+          <Button type="button" variant={form.type === "ingreso" ? "primary" : "secondary"} onClick={() => changeType("ingreso")}>
+            Ingreso
+          </Button>
+          <Button type="button" variant={form.type === "gasto" ? "primary" : "secondary"} onClick={() => changeType("gasto")}>
+            Gasto
+          </Button>
+        </div>
+      ) : null}
       <Field label="Descripción">
         <Input
           value={form.description}
