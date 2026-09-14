@@ -5,24 +5,24 @@ import { useFinanceState } from "../context/FinanceContext.jsx";
 import { Card, Button, ProgressBar } from "../components/ui/primitives.jsx";
 import { FinancialScoreGauge } from "../components/finance/FinancialScoreGauge.jsx";
 import { InsightCard } from "../components/finance/cards.jsx";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 import {
   calculateFinancialHealth,
   calculateAvailableMoney,
-  summarizeMonth,
   getUpcomingCommitments,
   projectBalance,
   hasFinancialData,
   getEmergencyFundStatus,
 } from "../services/financial/calculations.js";
+import { getFinancialDataReadiness } from "../services/financial/readiness.js";
 import { getMainInsight } from "../services/financial/insights.js";
 import { fmtBs, fmtFecha, fmtPct } from "../services/financial/format.js";
 
 const BREAKDOWN_LABELS = {
-  liquidez: "Liquidez",
-  ahorro: "Ahorro",
-  gastos: "Gastos",
+  flujoCaja: "Flujo de caja",
+  reserva: "Reserva financiera",
   endeudamiento: "Endeudamiento",
-  estabilidad: "Estabilidad",
+  planificacion: "Planificación",
 };
 
 export default function Inicio() {
@@ -59,9 +59,10 @@ export default function Inicio() {
         <EstadosIniciales hasAccounts={hasAccounts} hasTransactions={hasTransactions} navigate={navigate} />
       ) : null}
 
-      {conDatos ? <ResumenFinanciero state={state} /> : null}
+      {conDatos ? <ResumenFinanciero state={state} navigate={navigate} /> : null}
 
       <QuePuedesHacer state={state} navigate={navigate} conDatos={conDatos} />
+      <SectionGuide section="home" />
     </div>
   );
 }
@@ -109,11 +110,14 @@ function EstadosIniciales({ hasAccounts, hasTransactions, navigate }) {
   );
 }
 
-function ResumenFinanciero({ state }) {
+function ResumenFinanciero({ state, navigate }) {
+  const readiness = getFinancialDataReadiness(state);
   const health = calculateFinancialHealth(state);
   const { totalBalance, committed, available } = calculateAvailableMoney(state);
-  const thisMonth = summarizeMonth(state, "current");
-  const lastMonth = summarizeMonth(state, "previous");
+  const thisMonth = readiness.latestMonth || { ingresos: 0, gastos: 0, ahorro: null };
+  const lastMonth = readiness.comparableMonths?.current.key === readiness.latestMonth?.key
+    ? readiness.comparableMonths.previous
+    : null;
   const commitments = getUpcomingCommitments(state, 30).slice(0, 4);
   const insight = getMainInsight(state);
   const projection = projectBalance(state, 30);
@@ -122,19 +126,26 @@ function ResumenFinanciero({ state }) {
     <div className="flex flex-col gap-5">
       <div className="grid md:grid-cols-2 gap-5">
         <Card title="Salud financiera">
-          <FinancialScoreGauge score={health.score} />
-          <p className="text-sm text-ink-soft mt-3">{health.resumen}</p>
-          <div className="mt-4 flex flex-col gap-2">
-            {Object.entries(health.breakdown).map(([key, value]) => (
-              <div key={key}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span>{BREAKDOWN_LABELS[key]}</span>
-                  <span className="text-ink-soft">{value}/100</span>
-                </div>
-                <ProgressBar value={value} color="#1F5C56" />
+          {!health.available ? (
+            <div className="py-4">
+              <p className="font-medium">Salud financiera aún no disponible</p>
+              <p className="text-sm text-ink-soft mt-2">Completa {readiness.healthMissing.join(", ")} para calcularla con datos reales.</p>
+              <Button className="mt-4" size="sm" onClick={() => navigate("/analisis?config=health")}>Configurar</Button>
+            </div>
+          ) : (
+            <>
+              <FinancialScoreGauge score={health.score} />
+              <p className="text-sm text-ink-soft mt-3">{health.resumen}</p>
+              <div className="mt-4 flex flex-col gap-2">
+                {Object.entries(health.breakdown).map(([key, value]) => (
+                  <div key={key}>
+                    <div className="flex justify-between text-xs mb-1"><span>{BREAKDOWN_LABELS[key]}</span><span className="text-ink-soft">{value}%</span></div>
+                    <ProgressBar value={value} color="#1F5C56" />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </Card>
 
         <Card title="Dinero disponible">
@@ -158,21 +169,19 @@ function ResumenFinanciero({ state }) {
 
         <Card title="Resumen mensual">
           <div className="flex flex-col gap-2 text-sm">
-            <Row label="Ingresos" value={thisMonth.ingresos} prev={lastMonth.ingresos} currency={state.profile.currency} />
-            <Row label="Gastos" value={thisMonth.gastos} prev={lastMonth.gastos} invert currency={state.profile.currency} />
-            <Row label="Ahorro" value={thisMonth.ahorro} prev={lastMonth.ahorro} currency={state.profile.currency} />
+            <Row label="Ingresos" value={thisMonth.ingresos} prev={lastMonth?.ingresos} currency={state.profile.currency} />
+            <Row label="Gastos" value={thisMonth.gastos} prev={lastMonth?.gastos} invert currency={state.profile.currency} />
+            <Row label="Ahorro" value={thisMonth.ahorro} prev={lastMonth?.ahorro} currency={state.profile.currency} />
+            {!lastMonth && <p className="text-xs text-ink-soft mt-1">La comparación aparecerá cuando tengas dos meses completos de movimientos.</p>}
           </div>
         </Card>
 
         <Card title="Proyección de fin de mes">
-          <div className="font-display text-3xl font-semibold">{fmtBs(projection.end, state.profile.currency)}</div>
-          <p className="text-ink-soft text-sm mt-1">
-            Con tus ingresos y gastos actuales, esperamos que en 30 días tu saldo disponible ronde los{" "}
-            {fmtBs(projection.end, state.profile.currency)}.
-          </p>
-          <Link to="/flujo-de-dinero" className="text-ochre text-xs underline mt-2 inline-block">
-            Ver flujo de dinero completo
-          </Link>
+          {!projection.available ? (
+            <div className="py-4"><p className="font-medium">Proyección aún no disponible</p><p className="text-ink-soft text-sm mt-2">Completa {readiness.projectionMissing.join(", ")} para estimar tu saldo futuro.</p><Button className="mt-4" size="sm" onClick={() => navigate("/analisis?config=projection")}>Configurar</Button></div>
+          ) : (
+            <><div className="font-display text-3xl font-semibold">{fmtBs(projection.end, state.profile.currency)}</div><p className="text-ink-soft text-sm mt-1">Saldo estimado en 30 días según tus supuestos y compromisos registrados.</p><Link to="/analisis" className="text-ochre text-xs underline mt-2 inline-block">Ver proyección completa</Link></>
+          )}
         </Card>
       </div>
 
@@ -277,14 +286,16 @@ function QuePuedesHacer({ state, navigate, conDatos }) {
 }
 
 function Row({ label, value, prev, invert = false, currency = "BOB" }) {
-  const diff = value - prev;
+  const hasValue = value !== null && value !== undefined;
+  const hasPrevious = prev !== null && prev !== undefined;
+  const diff = hasValue && hasPrevious ? value - prev : 0;
   const improved = invert ? diff < 0 : diff > 0;
   return (
     <div className="flex justify-between items-baseline leader-dotted pb-1.5">
       <span className="text-ink-soft">{label}</span>
       <span className="tabular-nums">
-        {fmtBs(value, currency)}{" "}
-        {prev > 0 && (
+        {hasValue ? fmtBs(value, currency) : "No disponible"}{" "}
+        {hasPrevious && (
           <span className={`text-xs ${improved ? "text-teal" : "text-brick"}`}>
             ({diff >= 0 ? "+" : ""}
             {fmtBs(diff, currency)} vs mes ant.)
@@ -294,4 +305,3 @@ function Row({ label, value, prev, invert = false, currency = "BOB" }) {
     </div>
   );
 }
-

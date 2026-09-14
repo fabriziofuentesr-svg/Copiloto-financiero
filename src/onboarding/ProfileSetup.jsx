@@ -21,20 +21,17 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
     currency: initialValues?.currency || "BOB",
     employmentType: initialValues?.employmentType || "",
     estimatedMonthlyIncome: initialValues?.estimatedMonthlyIncome || "",
-    incomeDay: initialValues?.incomeDay || "",
   });
 
   function submit(e) {
     e.preventDefault();
     if (!form.name.trim()) return;
     const income = Number(form.estimatedMonthlyIncome);
-    const incomeDay = Number(form.incomeDay);
     onSubmit({
       name: form.name.trim(),
       currency: form.currency,
       employmentType: form.employmentType,
       estimatedMonthlyIncome: Number.isFinite(income) ? Math.max(0, income) : 0,
-      incomeDay: form.incomeDay && Number.isFinite(incomeDay) ? Math.min(31, Math.max(1, incomeDay)) : null,
     });
   }
 
@@ -68,16 +65,6 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
           placeholder="Ej. 4000"
         />
       </Field>
-      <Field label="Día habitual de recepción del ingreso (opcional)">
-        <Input
-          type="number"
-          min="1"
-          max="31"
-          value={form.incomeDay}
-          onChange={(e) => setForm({ ...form, incomeDay: e.target.value })}
-          placeholder="Ej. 30"
-        />
-      </Field>
       <Button type="submit" className="mt-2">{submitLabel}</Button>
     </form>
   );
@@ -99,4 +86,3 @@ export function ProfileSetup({ initialValues, onBack, onComplete }) {
     </div>
   );
 }
-

@@ -1,6 +1,7 @@
 // Cálculos financieros centrales. Funciones puras: reciben el estado
 // financiero y devuelven números/objetos, sin tocar React ni el DOM.
 import { addDays, isSameMonth, isPrevMonth, nextOccurrence, clamp } from "./format.js";
+import { getComparableMonths, getFinancialDataReadiness } from "./readiness.js";
 
 function addRecurringOccurrences(items, record, dayField, kind, today, horizon) {
   if (kind === "deuda" && (Number(record.balance) || 0) <= 0) return;
@@ -80,8 +81,19 @@ export function summarizeByCategory(state, which = "current") {
 }
 
 export function getCategoryTrends(state) {
-  const current = summarizeByCategory(state, "current");
-  const previous = summarizeByCategory(state, "previous");
+  const comparable = getComparableMonths(state);
+  if (!comparable || !comparable.current.hasExpenseData || !comparable.previous.hasExpenseData) return [];
+  const summarizeKey = (key) => {
+    const byCategory = {};
+    (state.transactions || [])
+      .filter((transaction) => transaction.type === "gasto" && String(transaction.date).slice(0, 7) === key)
+      .forEach((transaction) => {
+        byCategory[transaction.category] = (byCategory[transaction.category] || 0) + (Number(transaction.amount) || 0);
+      });
+    return Object.entries(byCategory).map(([categoryId, amount]) => ({ categoryId, amount }));
+  };
+  const current = summarizeKey(comparable.current.key);
+  const previous = summarizeKey(comparable.previous.key);
   const ids = new Set([...current.map((c) => c.categoryId), ...previous.map((c) => c.categoryId)]);
   return Array.from(ids)
     .map((id) => {
@@ -112,7 +124,10 @@ export function hasFinancialData(state) {
 // esenciales reales del usuario. Se usa en Planes (a detalle) y en el
 // resumen de Inicio (una línea), para no duplicar la fórmula en dos sitios.
 export function getEmergencyFundStatus(state) {
-  const essentialCategoryIds = (state.categories || []).filter((c) => c.essential).map((c) => c.id);
+  const configuredIds = state.financialSettings?.essentialCategoryIds || [];
+  const essentialCategoryIds = configuredIds.length > 0
+    ? configuredIds
+    : (state.categories || []).filter((c) => c.essential).map((c) => c.id);
   const essentialMonthly = getMonthTransactions(state, new Date(), "current")
     .filter((t) => t.type === "gasto" && essentialCategoryIds.includes(t.category))
     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
@@ -136,30 +151,34 @@ export function getTotalDebtBalance(state) {
   return (state.debts || []).reduce((s, d) => s + (Number(d.balance) || 0), 0);
 }
 
-// Proyección simple a N días: parte del saldo actual, aplica cada compromiso
-// que vence dentro del horizonte y suma los ingresos recurrentes esperados.
+// Proyección basada solo en datos configurados: saldo, ingresos esperados,
+// gastos variables estimados y compromisos registrados.
 export function projectBalance(state, days = 30, referenceDate = new Date()) {
+  const readiness = getFinancialDataReadiness(state);
   const today = new Date(referenceDate);
   const totalBalance = getTotalBalance(state);
   const horizon = addDays(today, Math.max(0, Number(days) || 0));
-  const events = getUpcomingCommitments(state, days, today).map((c) => ({ ...c, delta: -c.amount }));
+  if (!readiness.canCalculateProjection) {
+    return {
+      available: false,
+      missing: readiness.projectionMissing,
+      start: totalBalance,
+      end: null,
+      timeline: [],
+      minPoint: null,
+      atRisk: null,
+    };
+  }
 
-  // Añade cada ingreso mensual que cae dentro del horizonte, no solo el
-  // primero. Así una proyección de 180 días incluye todos sus cobros.
-  if (state.profile?.incomeDay && Number(state.profile.estimatedMonthlyIncome) > 0) {
-    let payDate = nextOccurrence(state.profile.incomeDay, today);
-    let occurrence = 0;
-    while (payDate <= horizon && occurrence < 1200) {
-      events.push({
-        id: "ingreso-esperado-" + occurrence,
-        name: "Ingreso esperado",
-        amount: Number(state.profile.estimatedMonthlyIncome),
-        date: payDate,
-        kind: "ingreso",
-        delta: Number(state.profile.estimatedMonthlyIncome),
-      });
-      occurrence += 1;
-      payDate = nextOccurrence(state.profile.incomeDay, new Date(payDate.getFullYear(), payDate.getMonth() + 1, 1));
+  const events = getUpcomingCommitments(state, days, today).map((c) => ({ ...c, delta: -c.amount }));
+  const expectedIncome = Number(state.financialSettings?.projection?.expectedMonthlyIncome || state.profile?.estimatedMonthlyIncome);
+  const expectedVariableExpenses = Number(state.financialSettings?.projection?.expectedVariableExpenses);
+  const months = Math.max(1, Math.ceil(days / 30));
+  for (let occurrence = 1; occurrence <= months; occurrence += 1) {
+    const eventDate = addDays(today, Math.min(days, occurrence * 30));
+    events.push({ id: `ingreso-esperado-${occurrence}`, name: "Ingresos esperados", amount: expectedIncome, date: eventDate, kind: "ingreso", delta: expectedIncome });
+    if (expectedVariableExpenses > 0) {
+      events.push({ id: `gastos-variables-${occurrence}`, name: "Gastos variables estimados", amount: expectedVariableExpenses, date: eventDate, kind: "gasto_variable", delta: -expectedVariableExpenses });
     }
   }
 
@@ -175,56 +194,64 @@ export function projectBalance(state, days = 30, referenceDate = new Date()) {
 
   const minPoint = timeline.reduce((min, e) => (e.balanceAfter < min ? e.balanceAfter : min), totalBalance);
 
-  return { start: totalBalance, end: running, timeline, minPoint, atRisk: minPoint < 0 };
+  const commitments = events.filter((event) => event.delta < 0 && event.kind !== "gasto_variable").reduce((sum, event) => sum + Math.abs(event.delta), 0);
+  return {
+    available: true,
+    missing: [],
+    start: totalBalance,
+    end: running,
+    timeline,
+    minPoint,
+    atRisk: minPoint < 0,
+    expectedIncome: expectedIncome * months,
+    expectedVariableExpenses: expectedVariableExpenses * months,
+    commitments,
+  };
 }
 
 // --- Salud financiera --------------------------------------------------
-// 0-100, con 5 componentes de 20 puntos cada uno, calculados de forma
-// independiente de la UI. `calculateFinancialHealth()` es la función que
-// pediste que existiera aparte de los componentes React.
 export function calculateFinancialHealth(state) {
-  const { totalBalance, committed, available } = calculateAvailableMoney(state);
-  const { ingresos, gastos } = summarizeMonth(state, "current");
-  const cuotas = getTotalDebtInstallments(state);
-  const hasIncome = ingresos > 0;
-  const dti = hasIncome ? cuotas / ingresos : null;
-  const tasaAhorro = hasIncome ? (ingresos - gastos - cuotas) / ingresos : null;
-  const gastoTotalMensual = gastos + cuotas;
-  const liquidezDias = gastoTotalMensual > 0 ? (available / gastoTotalMensual) * 30 : 0;
+  const readiness = getFinancialDataReadiness(state);
+  if (!readiness.canCalculateFinancialHealth) {
+    return { available: false, score: null, breakdown: null, resumen: "Salud financiera aún no disponible", missing: readiness.healthMissing };
+  }
 
-  // Cada componente se calcula en su propia escala 0-100 (20% de peso cada
-  // uno sobre el total, que es simplemente su promedio).
-  const liquidez = clamp((available / Math.max(1, committed || totalBalance * 0.5)) * 100, 0, 100);
-  // Sin ingresos registrados no se puede calificar ahorro, gastos o deuda
-  // como excelentes. Usamos un valor neutro o de riesgo cuando hay deuda,
-  // evitando recomendaciones engañosas por falta de datos.
-  const ahorro = hasIncome ? clamp((tasaAhorro / 0.2) * 100, 0, 100) : 50;
-  const gastosScore = hasIncome
-    ? clamp(100 - clamp((gastos - ingresos * 0.5) / (ingresos * 0.5 || 1), 0, 1) * 100, 0, 100)
-    : gastos > 0
-      ? 0
-      : 50;
-  const endeudamiento = hasIncome
-    ? dti <= 0.15
-      ? 100
-      : dti >= 0.5
-        ? 0
-        : clamp(100 * (1 - (dti - 0.15) / 0.35), 0, 100)
-    : cuotas > 0
-      ? 0
-      : 50;
-  const estabilidad = gastoTotalMensual > 0 ? clamp((liquidezDias / 30) * 100, 0, 100) : 50;
+  const { available } = calculateAvailableMoney(state);
+  const { ingresos, gastos, key } = readiness.latestMonth;
+  const cuotas = getTotalDebtInstallments(state);
+  const settings = state.financialSettings;
+  const margin = ingresos - gastos - cuotas;
+  const tasaAhorro = margin / ingresos;
+  const personalTargetRate = settings.savingsTargetType === "percentage"
+    ? Number(settings.savingsTargetValue) / 100
+    : Number(settings.savingsTargetValue) / ingresos;
+  const flujoCaja = margin < 0 ? 0 : clamp((tasaAhorro / Math.max(personalTargetRate, 0.01)) * 100, 0, 100);
+  const essentialIds = settings.essentialCategoryIds || [];
+  const essentialMonthly = (state.transactions || [])
+    .filter((transaction) => transaction.type === "gasto" && String(transaction.date).slice(0, 7) === key && essentialIds.includes(transaction.category))
+    .reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
+  const liquidSavings = (state.accounts || []).filter((account) => account.type === "ahorro").reduce((sum, account) => sum + Math.max(0, Number(account.balance) || 0), 0) + Math.max(0, Number(state.emergencyFund?.current) || 0);
+  const coverageMonths = essentialMonthly > 0 ? liquidSavings / essentialMonthly : 0;
+  const resilience = clamp((coverageMonths / Math.max(1, Number(state.emergencyFund?.monthsTarget) || 1)) * 100, 0, 100);
+  const dti = settings.debtStatus === "none" ? 0 : cuotas / ingresos;
+  const endeudamiento = settings.debtStatus === "none" ? 100 : clamp(100 - dti * 200, 0, 100);
+  const planningItems = [
+    readiness.hasEssentialExpenses,
+    readiness.hasSavingsGoal,
+    readiness.hasEmergencyTarget,
+    readiness.hasDebtConfiguration,
+    (state.goals || []).length > 0,
+    (state.recurringExpenses || []).length > 0 || (state.debts || []).length > 0,
+  ];
+  const planificacion = (planningItems.filter(Boolean).length / planningItems.length) * 100;
 
   const breakdown = {
-    liquidez: Math.round(liquidez),
-    ahorro: Math.round(ahorro),
-    gastos: Math.round(gastosScore),
+    flujoCaja: Math.round(flujoCaja),
+    reserva: Math.round(resilience),
     endeudamiento: Math.round(endeudamiento),
-    estabilidad: Math.round(estabilidad),
+    planificacion: Math.round(planificacion),
   };
-  const score = Math.round(
-    (breakdown.liquidez + breakdown.ahorro + breakdown.gastos + breakdown.endeudamiento + breakdown.estabilidad) / 5
-  );
+  const score = Math.round(Object.values(breakdown).reduce((sum, value) => sum + value, 0) / 4);
 
   let resumen = "Tu situación financiera es crítica: necesita atención inmediata.";
   if (score > 80) resumen = "Tu situación financiera es sólida. Estás en buena posición para avanzar hacia tus metas.";
@@ -232,9 +259,8 @@ export function calculateFinancialHealth(state) {
   else if (score > 40) resumen = "Tu situación financiera es débil: hay riesgos que conviene atender pronto.";
 
   const lowest = Object.entries(breakdown).sort((a, b) => a[1] - b[1])[0];
-  const labels = { liquidez: "liquidez", ahorro: "ahorro", gastos: "control de gastos", endeudamiento: "nivel de endeudamiento", estabilidad: "estabilidad financiera" };
+  const labels = { flujoCaja: "flujo de caja", reserva: "reserva financiera", endeudamiento: "nivel de endeudamiento", planificacion: "planificación" };
   if (score <= 80) resumen += ` Tu principal oportunidad de mejora está en tu ${labels[lowest[0]]}.`;
 
-  return { score, breakdown, resumen, dti, tasaAhorro, liquidezDias };
+  return { available: true, score, breakdown, resumen, dti, tasaAhorro, margin, coverageMonths, missing: [] };
 }
-

@@ -6,6 +6,26 @@ const STORAGE_KEY = "estado-financiero-v1";
 const FinanceStateContext = createContext(null);
 const FinanceDispatchContext = createContext(null);
 
+function normalizeState(savedState) {
+  const empty = buildEmptyState();
+  if (!savedState) return empty;
+  return {
+    ...empty,
+    ...savedState,
+    profile: { ...empty.profile, ...(savedState.profile || {}) },
+    emergencyFund: { ...empty.emergencyFund, ...(savedState.emergencyFund || {}) },
+    financialSettings: {
+      ...empty.financialSettings,
+      ...(savedState.financialSettings || {}),
+      projection: {
+        ...empty.financialSettings.projection,
+        ...(savedState.financialSettings?.projection || {}),
+      },
+    },
+    sectionGuidesSeen: savedState.sectionGuidesSeen || {},
+  };
+}
+
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
@@ -26,6 +46,8 @@ function reducer(state, action) {
         debts: state.debts,
         recurringExpenses: state.recurringExpenses,
         emergencyFund: state.emergencyFund,
+        financialSettings: state.financialSettings,
+        sectionGuidesSeen: state.sectionGuidesSeen,
       };
       return {
         ...demo,
@@ -49,6 +71,24 @@ function reducer(state, action) {
     case "UPDATE_PROFILE":
       return { ...state, profile: { ...state.profile, ...action.payload } };
 
+    case "UPDATE_FINANCIAL_SETTINGS":
+      return { ...state, financialSettings: { ...state.financialSettings, ...action.payload } };
+
+    case "SET_PROJECTION_SETTINGS":
+      return {
+        ...state,
+        financialSettings: {
+          ...state.financialSettings,
+          projection: { ...state.financialSettings?.projection, ...action.payload },
+        },
+      };
+
+    case "MARK_SECTION_GUIDE_SEEN":
+      return {
+        ...state,
+        sectionGuidesSeen: { ...state.sectionGuidesSeen, [action.payload]: true },
+      };
+
     // Borra los datos financieros (cuentas, movimientos, deudas, objetivos)
     // pero conserva el perfil ya configurado por el usuario.
     case "CLEAR_FINANCIAL_DATA":
@@ -59,7 +99,8 @@ function reducer(state, action) {
         goals: [],
         debts: [],
         recurringExpenses: [],
-        emergencyFund: { current: 0, monthsTarget: 3 },
+        emergencyFund: { current: 0, monthsTarget: 3, configured: false },
+        financialSettings: buildEmptyState().financialSettings,
         demoBackup: null,
       };
 
@@ -204,7 +245,7 @@ function reducer(state, action) {
 }
 
 export function FinanceProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, null, () => loadState(STORAGE_KEY) || buildEmptyState());
+  const [state, dispatch] = useReducer(reducer, null, () => normalizeState(loadState(STORAGE_KEY)));
 
   useEffect(() => {
     saveState(STORAGE_KEY, state);
@@ -228,4 +269,3 @@ export function useFinanceDispatch() {
   if (!ctx) throw new Error("useFinanceDispatch debe usarse dentro de <FinanceProvider>");
   return ctx;
 }
-

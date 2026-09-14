@@ -3,7 +3,7 @@ import { useFinanceDispatch, useFinanceState } from "../../context/FinanceContex
 import { ACCOUNT_TYPES } from "../../data/mockData.js";
 import { Button, Field, Input, Select } from "../ui/primitives.jsx";
 
-const EMPTY_ACCOUNT = { name: "", type: "banco", balance: "" };
+const EMPTY_ACCOUNT = { name: "", type: "efectivo", balance: "" };
 
 export function AccountForm({ onSuccess, submitLabel = "Guardar cuenta" }) {
   const state = useFinanceState();
@@ -60,4 +60,3 @@ export function AccountForm({ onSuccess, submitLabel = "Guardar cuenta" }) {
     </form>
   );
 }
-

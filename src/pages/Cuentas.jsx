@@ -5,6 +5,7 @@ import { Card, Button, Modal } from "../components/ui/primitives.jsx";
 import { AccountCard } from "../components/finance/cards.jsx";
 import { AccountForm } from "../components/finance/AccountForm.jsx";
 import { fmtBs } from "../services/financial/format.js";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 
 export default function Cuentas() {
   const state = useFinanceState();
@@ -48,7 +49,7 @@ export default function Cuentas() {
         Este prototipo todavía no se conecta a tu banco de forma real: los saldos se registran manualmente. La
         arquitectura está lista para agregar esa integración más adelante.
       </p>
+      <SectionGuide section="accounts" />
     </div>
   );
 }
-

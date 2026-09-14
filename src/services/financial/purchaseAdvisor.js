@@ -1,10 +1,21 @@
 // Herramienta "¿Puedo permitírmelo?". No compara solo contra el saldo:
 // mira disponible real, ingresos, deuda y qué tan lejos deja al usuario
 // de su colchón de liquidez recomendado.
-import { calculateAvailableMoney, calculateFinancialHealth, summarizeMonth } from "./calculations.js";
+import { calculateAvailableMoney, calculateFinancialHealth } from "./calculations.js";
+import { getFinancialDataReadiness } from "./readiness.js";
+import { fmtBs } from "./format.js";
 
 export function evaluatePurchase(state, amount) {
-  if (state.accounts.length === 0) {
+  const purchaseAmount = Number(amount);
+  if (!Number.isFinite(purchaseAmount) || purchaseAmount <= 0) {
+    return {
+      verdict: "sin_datos",
+      label: "Indica un monto válido",
+      explanation: "Escribe un precio mayor a cero para evaluar la compra.",
+    };
+  }
+
+  if (!(state.accounts || []).length) {
     return {
       verdict: "sin_datos",
       label: "Todavía no tienes cuentas registradas",
@@ -14,11 +25,12 @@ export function evaluatePurchase(state, amount) {
 
   const { available, totalBalance } = calculateAvailableMoney(state);
   const health = calculateFinancialHealth(state);
-  const { ingresos } = summarizeMonth(state, "current");
-  const restante = available - amount;
-  const restanteComoPctIngreso = ingresos > 0 ? restante / ingresos : 0;
+  const readiness = getFinancialDataReadiness(state);
+  const ingresos = readiness.latestMonth?.ingresos || 0;
+  const restante = available - purchaseAmount;
+  const restanteComoPctIngreso = ingresos > 0 ? restante / ingresos : null;
 
-  if (amount > totalBalance) {
+  if (purchaseAmount > totalBalance) {
     return {
       verdict: "no",
       label: "No recomendable",
@@ -34,7 +46,15 @@ export function evaluatePurchase(state, amount) {
     };
   }
 
-  if (restanteComoPctIngreso < 0.15 || health.score < 40) {
+  if (restanteComoPctIngreso === null) {
+    return {
+      verdict: "precaucion",
+      label: "La compra cabe en tu saldo, pero falta información",
+      explanation: "Registra un ingreso real para evaluar cuánto margen mensual te dejaría esta compra.",
+    };
+  }
+
+  if (restanteComoPctIngreso < 0.15 || (health.available && health.score < 40)) {
     return {
       verdict: "precaucion",
       label: "Puedes comprarla, pero no es recomendable ahora",
@@ -42,10 +62,18 @@ export function evaluatePurchase(state, amount) {
     };
   }
 
+  if (!health.available) {
+    return {
+      verdict: "precaucion",
+      label: "La compra cabe en tu saldo, pero el análisis está incompleto",
+      explanation: "Configura tu salud financiera en Análisis para valorar también tu reserva, deudas y objetivo de ahorro.",
+    };
+  }
+
   return {
     verdict: "si",
     label: "Recomendable",
-    explanation: `Después de esta compra te quedarían ${Math.round(restante)} bolivianos disponibles, un margen razonable frente a tus compromisos.`,
+      explanation: `Después de esta compra te quedarían ${fmtBs(restante, state.profile?.currency)} disponibles, un margen razonable frente a tus compromisos.`,
     restante,
   };
 }
