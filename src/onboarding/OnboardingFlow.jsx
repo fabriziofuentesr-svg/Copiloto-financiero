@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.jsx";
 import { Welcome } from "./Welcome.jsx";
-import { ProductIntroduction } from "./ProductIntroduction.jsx";
 import { ProfileSetup } from "./ProfileSetup.jsx";
 import { FinancialSetup } from "./FinancialSetup.jsx";
 import { GuideCarousel } from "./GuideCarousel.jsx";
@@ -24,18 +23,14 @@ export function OnboardingFlow() {
   }
 
   if (step === "welcome") {
-    return <Welcome onStart={() => setStep("introduction")} />;
-  }
-
-  if (step === "introduction") {
-    return <ProductIntroduction onBack={() => setStep("welcome")} onContinue={() => setStep("profile")} />;
+    return <Welcome onStart={() => setStep("profile")} />;
   }
 
   if (step === "profile") {
     return (
       <ProfileSetup
         initialValues={state.profile}
-        onBack={() => setStep("introduction")}
+        onBack={() => setStep("welcome")}
         onComplete={handleProfileComplete}
       />
     );
@@ -53,8 +48,8 @@ export function OnboardingFlow() {
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-md border border-line rounded p-6 bg-paper">
         <GuideCarousel
-          includeIntroduction={false}
-          initialStep={step === "guide-last" ? 4 : 0}
+          initialStep={step === "guide-last" ? 5 : 0}
+          onBackStart={() => setStep("finance")}
           onFinish={() => setStep("complete")}
           onSkip={() => setStep("complete")}
         />
