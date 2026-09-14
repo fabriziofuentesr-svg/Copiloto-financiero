@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeftRight, Target, BarChart3, Bot, ShoppingBag, Compass } from "lucide-react";
+import { ArrowLeftRight, Target, BarChart3, Bot, ShoppingBag, Compass, Check } from "lucide-react";
 import { Button } from "../components/ui/primitives.jsx";
 
 const STEPS = [
@@ -38,7 +38,7 @@ const STEPS = [
 
 // Se usa tanto en el onboarding (a pantalla completa) como reabierta desde
 // Configuración/Ayuda (dentro de un modal). El contenido es el mismo.
-export function GuideCarousel({ onFinish, onSkip, includeIntroduction = true, initialStep = 0 }) {
+export function GuideCarousel({ onFinish, onSkip, onBackStart, includeIntroduction = true, initialStep = 0 }) {
   const visibleSteps = includeIntroduction ? STEPS : STEPS.slice(1);
   const [step, setStep] = useState(() => Math.min(initialStep, visibleSteps.length - 1));
   const isLast = step === visibleSteps.length - 1;
@@ -67,15 +67,27 @@ export function GuideCarousel({ onFinish, onSkip, includeIntroduction = true, in
         </div>
         <h3 className="font-display text-xl font-semibold">{current.title}</h3>
         <p className="text-ink-soft text-sm mt-2 max-w-sm">{current.text}</p>
+        {current.introduction ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5 text-left">
+            {["Entiende tu situación financiera", "Organiza tus movimientos", "Planifica tus objetivos", "Analiza tus hábitos", "Toma mejores decisiones"].map((benefit) => (
+              <div key={benefit} className="flex items-center gap-2 rounded bg-paper-raised px-3 py-2 text-xs">
+                <Check size={14} className="text-teal shrink-0" />
+                <span>{benefit}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex items-center justify-between w-full gap-2 mt-2">
         <div>
-          {step > 0 && (
+          {step > 0 ? (
             <Button variant="secondary" size="sm" onClick={() => setStep((s) => s - 1)}>
               Atrás
             </Button>
-          )}
+          ) : onBackStart ? (
+            <Button variant="secondary" size="sm" onClick={onBackStart}>Atrás</Button>
+          ) : null}
         </div>
         <div className="flex gap-2">
           {!isLast && (
