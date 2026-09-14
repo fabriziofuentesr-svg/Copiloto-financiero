@@ -4,6 +4,7 @@ import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.j
 import { Card, Button, Modal } from "../components/ui/primitives.jsx";
 import { ProfileForm } from "../onboarding/ProfileSetup.jsx";
 import { GuideCarousel } from "../onboarding/GuideCarousel.jsx";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 
 const EMPLOYMENT_LABELS = {
   dependiente: "Dependiente (sueldo fijo)",
@@ -37,14 +38,16 @@ export default function Configuracion() {
             <Row label="Nombre" value={state.profile.name || "—"} />
             <Row label="Moneda principal" value={state.profile.currency} />
             <Row label="Situación laboral" value={EMPLOYMENT_LABELS[state.profile.employmentType] || "No especificado"} />
-            <Row label="Ingreso mensual aproximado" value={state.profile.estimatedMonthlyIncome ? `Bs ${state.profile.estimatedMonthlyIncome}` : "No especificado"} />
-            <Row label="Día habitual de ingreso" value={state.profile.incomeDay || "No especificado"} />
+            <Row
+              label="Ingreso mensual aproximado"
+              value={state.profile.estimatedMonthlyIncome ? `${state.profile.currency === "USD" ? "USD" : "Bs"} ${state.profile.estimatedMonthlyIncome}` : "No especificado"}
+            />
           </div>
         )}
       </Card>
 
       <Card title="Ayuda">
-        <p className="text-sm text-ink-soft mb-3">Vuelve a ver la guía breve de las 5 secciones principales de la app.</p>
+        <p className="text-sm text-ink-soft mb-3">Vuelve a ver la guía general de las secciones principales de la app.</p>
         <Button variant="secondary" onClick={() => setGuiaAbierta(true)}>
           <HelpCircle size={14} /> Ver guía rápida
         </Button>
@@ -53,8 +56,8 @@ export default function Configuracion() {
       <Card title="Datos">
         <p className="text-sm text-ink-soft mb-3">
           Tu perfil y tus datos financieros se guardan en este navegador. Puedes explorar la app con datos de
-          demostración (esto reemplaza temporalmente tus datos reales) o borrar tus datos financieros y empezar de
-          nuevo, sin perder tu perfil.
+          demostración; tus datos actuales se conservan y podrás restaurarlos al terminar. También puedes borrar tus
+          datos financieros y empezar de nuevo, sin perder tu perfil.
         </p>
         <div className="flex flex-col gap-2">
           <Button
@@ -67,6 +70,14 @@ export default function Configuracion() {
           >
             Cargar datos de ejemplo (demostración)
           </Button>
+          {state.demoBackup && (
+            <Button
+              variant="secondary"
+              onClick={() => dispatch({ type: "RESTORE_USER_DATA" })}
+            >
+              Restaurar mis datos anteriores
+            </Button>
+          )}
           <Button
             variant="danger"
             onClick={() => {
@@ -83,6 +94,7 @@ export default function Configuracion() {
       <Modal open={guiaAbierta} onClose={() => setGuiaAbierta(false)} title="Guía rápida">
         <GuideCarousel onFinish={() => setGuiaAbierta(false)} onSkip={() => setGuiaAbierta(false)} />
       </Modal>
+      <SectionGuide section="settings" />
     </div>
   );
 }
