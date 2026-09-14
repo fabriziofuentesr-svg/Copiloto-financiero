@@ -5,6 +5,7 @@ import { useFinanceState } from "../context/FinanceContext.jsx";
 import { Card, Button, Modal, Field, Input, Select } from "../components/ui/primitives.jsx";
 import { TransactionItem } from "../components/finance/cards.jsx";
 import { TransactionForm } from "../components/finance/TransactionForm.jsx";
+import { SectionGuide } from "../components/SectionGuide.jsx";
 
 export default function Movimientos() {
   const state = useFinanceState();
@@ -102,7 +103,7 @@ export default function Movimientos() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={movementType === "ingreso" ? "Nuevo ingreso" : "Nuevo gasto"}>
         <TransactionForm key={movementType} initialType={movementType} onSuccess={() => setModalOpen(false)} />
       </Modal>
+      <SectionGuide section="movements" />
     </div>
   );
 }
-
