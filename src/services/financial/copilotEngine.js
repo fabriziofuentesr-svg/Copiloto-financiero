@@ -2,7 +2,8 @@
 // palabras clave sobre los mismos datos financieros del usuario — no un
 // chatbot genérico. Está aislado para poder sustituirlo después por una
 // llamada real a la API de Claude sin tocar la UI del chat.
-import { calculateAvailableMoney, calculateFinancialHealth, summarizeMonth, getCategoryTrends, projectBalance, hasFinancialData } from "./calculations.js";
+import { calculateAvailableMoney, calculateFinancialHealth, getCategoryTrends, projectBalance, hasFinancialData } from "./calculations.js";
+import { getFinancialDataReadiness } from "./readiness.js";
 import { evaluatePurchase } from "./purchaseAdvisor.js";
 import { estimateGoalCompletion } from "./goals.js";
 import { fmtBs, fmtPct } from "./format.js";
@@ -60,8 +61,9 @@ export function answerQuestion(state, question) {
   const unit = currency === "USD" ? "USD" : "Bs";
   const { available } = calculateAvailableMoney(state);
   const health = calculateFinancialHealth(state);
-  const { ingresos, gastos, ahorro } = summarizeMonth(state, "current");
-  const requestedGoal = state.goals.find((item) => q.includes(String(item.name || "").toLowerCase()));
+  const readiness = getFinancialDataReadiness(state);
+  const { ingresos = 0, gastos = 0, ahorro = null } = readiness.latestMonth || {};
+  const requestedGoal = (state.goals || []).find((item) => q.includes(String(item.name || "").toLowerCase()));
 
   if (q.includes("puedo comprar") || q.includes("puedo permitirme") || (q.includes("comprar") && /\d/.test(q))) {
     const amount = extractAmount(q);
@@ -74,10 +76,12 @@ export function answerQuestion(state, question) {
   }
 
   if (q.includes("cuánto puedo ahorrar") || q.includes("cuanto puedo ahorrar")) {
+    if (ahorro === null) return "Necesito al menos un ingreso y un gasto reales del mismo mes para estimar cuánto podrías ahorrar.";
     return `A tu ritmo actual, este mes te quedarían aproximadamente ${fmtBs(ahorro, currency)} después de tus gastos (ingresos ${fmtBs(ingresos, currency)}, gastos ${fmtBs(gastos, currency)}).`;
   }
 
   if (q.includes("por qué gasté") || q.includes("por que gaste") || q.includes("gasté más") || q.includes("gaste mas")) {
+    if (!readiness.canCompareMonths) return "Necesito ingresos y gastos reales de al menos dos meses distintos para explicar cambios entre períodos.";
     const trends = getCategoryTrends(state).filter((t) => t.change > 0.15).sort((a, b) => b.change - a.change);
     if (trends.length === 0) return "No veo aumentos importantes este mes respecto al anterior. Tus gastos se mantienen parecidos.";
     const top = trends.slice(0, 2).map((t) => `${t.name.toLowerCase()} (${fmtPct(t.change)})`).join(" y ");
@@ -85,7 +89,7 @@ export function answerQuestion(state, question) {
   }
 
   if (q.includes("objetivo") || q.includes("meta") || requestedGoal) {
-    const goal = requestedGoal || state.goals[0];
+    const goal = requestedGoal || (state.goals || [])[0];
     if (!goal) return "Todavía no tienes objetivos creados. Puedes agregar uno desde la sección Planes.";
     const est = estimateGoalCompletion(goal);
     if (est.months === null) {
@@ -95,7 +99,7 @@ export function answerQuestion(state, question) {
   }
 
   if (q.includes("deuda") && (q.includes("priorizar") || q.includes("primero"))) {
-    const worst = [...state.debts].sort((a, b) => b.rate - a.rate)[0];
+    const worst = [...(state.debts || [])].sort((a, b) => b.rate - a.rate)[0];
     if (!worst) return "No tienes deudas registradas.";
     return `Prioriza "${worst.name}": tiene la tasa más alta (${worst.rate}% anual), así que es la que más te cuesta mantener con el tiempo.`;
   }
@@ -106,9 +110,10 @@ export function answerQuestion(state, question) {
 
   if (q.includes("6 meses") || q.includes("proyección") || q.includes("proyeccion") || q.includes("cómo estaré") || q.includes("como estare")) {
     const projection = projectBalance(state, 180);
+    if (!projection.available) return `La proyección aún no está disponible. Completa ${projection.missing.join(", ")} desde Análisis para calcularla.`;
     return `Proyectando tus ingresos y gastos actuales a 180 días, tu saldo estimado rondaría los ${fmtBs(projection.end, currency)}. ${projection.atRisk ? "Ojo: en el camino hay un punto donde tu liquidez podría caer por debajo de cero." : "El camino se ve estable, sin caídas fuertes de liquidez en el medio."}`;
   }
 
-  return `Tu salud financiera hoy es de ${health.score}/100 (${health.resumen}) Puedo ayudarte con preguntas como cuánto puedes gastar, si te conviene una compra, qué deuda priorizar o cómo va tu objetivo de ahorro.`;
+  if (!health.available) return `Tu salud financiera aún no está disponible. Completa ${health.missing.join(", ")} desde Análisis. Mientras tanto, puedo decirte cuánto dinero tienes disponible o ayudarte con tus objetivos.`;
+  return `Tu salud financiera hoy es de ${health.score}% (${health.resumen}) Puedo ayudarte con preguntas como cuánto puedes gastar, si te conviene una compra, qué deuda priorizar o cómo va tu objetivo de ahorro.`;
 }
-
