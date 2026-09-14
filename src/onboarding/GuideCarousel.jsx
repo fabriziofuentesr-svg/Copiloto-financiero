@@ -1,8 +1,14 @@
 import React, { useState } from "react";
-import { ArrowLeftRight, Target, BarChart3, Bot, ShoppingBag } from "lucide-react";
+import { ArrowLeftRight, Target, BarChart3, Bot, ShoppingBag, Compass } from "lucide-react";
 import { Button } from "../components/ui/primitives.jsx";
 
 const STEPS = [
+  {
+    icon: Compass,
+    title: "Tu dinero, bajo control",
+    text: "Un copiloto financiero personal que te ayuda a entender tu dinero, organizar tus finanzas y tomar mejores decisiones.",
+    introduction: true,
+  },
   {
     icon: ArrowLeftRight,
     title: "Movimientos",
@@ -32,18 +38,23 @@ const STEPS = [
 
 // Se usa tanto en el onboarding (a pantalla completa) como reabierta desde
 // Configuración/Ayuda (dentro de un modal). El contenido es el mismo.
-export function GuideCarousel({ onFinish, onSkip }) {
-  const [step, setStep] = useState(0);
-  const isLast = step === STEPS.length - 1;
-  const current = STEPS[step];
+export function GuideCarousel({ onFinish, onSkip, includeIntroduction = true, initialStep = 0 }) {
+  const visibleSteps = includeIntroduction ? STEPS : STEPS.slice(1);
+  const [step, setStep] = useState(() => Math.min(initialStep, visibleSteps.length - 1));
+  const isLast = step === visibleSteps.length - 1;
+  const current = visibleSteps[step];
   const Icon = current.icon;
+  const displayedStep = includeIntroduction ? step : step + 1;
 
   return (
     <div className="flex flex-col items-center text-center gap-5 py-2">
       <div className="flex gap-1.5">
-        {STEPS.map((_, i) => (
-          <span key={i} className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-ochre" : "w-1.5 bg-paper-raised"}`} />
-        ))}
+        {STEPS.map((_, i) => {
+          const activeIndex = includeIntroduction ? step : step + 1;
+          return (
+          <span key={i} className={`h-1.5 rounded-full transition-all ${i === activeIndex ? "w-6 bg-ochre" : "w-1.5 bg-paper-raised"}`} />
+          );
+        })}
       </div>
 
       <div className="w-14 h-14 rounded-full bg-teal/10 flex items-center justify-center">
@@ -51,7 +62,9 @@ export function GuideCarousel({ onFinish, onSkip }) {
       </div>
 
       <div>
-        <div className="text-xs text-ink-soft mb-1">Paso {step + 1} de {STEPS.length}</div>
+        <div className="text-xs text-ink-soft mb-1">
+          {current.introduction ? "Introducción · 1 de 6" : `Paso ${displayedStep} de 5`}
+        </div>
         <h3 className="font-display text-xl font-semibold">{current.title}</h3>
         <p className="text-ink-soft text-sm mt-2 max-w-sm">{current.text}</p>
       </div>
@@ -72,7 +85,7 @@ export function GuideCarousel({ onFinish, onSkip }) {
           )}
           {isLast ? (
             <Button size="sm" onClick={onFinish}>
-              Comenzar a usar la app
+              Finalizar guía
             </Button>
           ) : (
             <Button size="sm" onClick={() => setStep((s) => s + 1)}>
@@ -84,3 +97,4 @@ export function GuideCarousel({ onFinish, onSkip }) {
     </div>
   );
 }
+

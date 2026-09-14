@@ -1,52 +1,25 @@
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
-import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.jsx";
+import { useFinanceState } from "../context/FinanceContext.jsx";
 import { Card, Button, Modal, Field, Input, Select } from "../components/ui/primitives.jsx";
 import { TransactionItem } from "../components/finance/cards.jsx";
-
-const emptyForm = { description: "", amount: "", date: new Date().toISOString().slice(0, 10), category: "", accountId: "", paymentMethod: "", type: "gasto" };
+import { TransactionForm } from "../components/finance/TransactionForm.jsx";
 
 export default function Movimientos() {
   const state = useFinanceState();
-  const dispatch = useFinanceDispatch();
   const [params] = useSearchParams();
-
   const [modalOpen, setModalOpen] = useState(Boolean(params.get("nuevo")));
-  const [form, setForm] = useState({
-    ...emptyForm,
-    type: params.get("nuevo") === "ingreso" ? "ingreso" : "gasto",
-    category: state.categories.find((c) => c.type === (params.get("nuevo") === "ingreso" ? "ingreso" : "gasto"))?.id || "",
-    accountId: state.accounts[0]?.id || "",
-    paymentMethod: state.paymentMethods[0]?.id || "",
-  });
+  const [movementType, setMovementType] = useState(params.get("nuevo") === "ingreso" ? "ingreso" : "gasto");
 
   const [filtroCategoria, setFiltroCategoria] = useState("todas");
   const [filtroCuenta, setFiltroCuenta] = useState("todas");
   const [busqueda, setBusqueda] = useState("");
   const [orden, setOrden] = useState("reciente");
 
-  const categoriasDisponibles = state.categories.filter((c) => c.type === form.type || (form.type === "gasto" && c.type === "gasto"));
-
   function abrirNuevo(tipo) {
-    setForm({
-      ...emptyForm,
-      type: tipo,
-      category: state.categories.find((c) => c.type === tipo)?.id || state.categories[0].id,
-      accountId: state.accounts[0]?.id || "",
-      paymentMethod: state.paymentMethods[0]?.id || "",
-    });
+    setMovementType(tipo);
     setModalOpen(true);
-  }
-
-  function guardar(e) {
-    e.preventDefault();
-    if (!form.description || !form.amount || !form.accountId) return;
-    dispatch({
-      type: "ADD_TRANSACTION",
-      payload: { ...form, amount: Number(form.amount), date: new Date(form.date).toISOString() },
-    });
-    setModalOpen(false);
   }
 
   const movimientosFiltrados = useMemo(() => {
@@ -119,51 +92,17 @@ export default function Movimientos() {
               tx={tx}
               categoryName={state.categories.find((c) => c.id === tx.category)?.name || tx.category}
               accountName={state.accounts.find((a) => a.id === tx.accountId)?.name || "—"}
+              currency={state.profile.currency}
               onDelete={() => dispatch({ type: "DELETE_TRANSACTION", payload: tx.id })}
             />
           ))
         )}
       </Card>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={form.type === "ingreso" ? "Nuevo ingreso" : "Nuevo gasto"}>
-        <form onSubmit={guardar} className="flex flex-col gap-3">
-          <Field label="Descripción">
-            <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Ej. Supermercado" required />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Monto (Bs)">
-              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required />
-            </Field>
-            <Field label="Fecha">
-              <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Categoría">
-              <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                {categoriasDisponibles.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Cuenta">
-              <Select value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
-                {state.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Field label="Método de pago">
-            <Select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}>
-              {state.paymentMethods.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </Select>
-          </Field>
-          <Button type="submit" className="mt-2">Guardar</Button>
-        </form>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={movementType === "ingreso" ? "Nuevo ingreso" : "Nuevo gasto"}>
+        <TransactionForm key={movementType} initialType={movementType} onSuccess={() => setModalOpen(false)} />
       </Modal>
     </div>
   );
 }
+
