@@ -65,6 +65,7 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
           placeholder="Ej. 4000"
         />
       </Field>
+      <p className="text-xs text-ink-soft">Es una estimación para personalizar la app. No se registrará como movimiento ni se sumará a tus ingresos reales.</p>
       <Button type="submit" className="mt-2">{submitLabel}</Button>
     </form>
   );
@@ -75,8 +76,7 @@ export function ProfileSetup({ initialValues, onBack, onComplete }) {
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
       <Card className="w-full max-w-md" title="Cuéntanos un poco de ti">
         <p className="text-ink-soft text-sm mb-4">
-          Solo lo esencial para empezar. Podrás registrar tus ingresos, gastos, deudas y objetivos con detalle más
-          adelante, desde sus propias secciones.
+          Paso 1 de 2. Completa tus datos básicos; los movimientos se registran después desde Inicio o Movimientos.
         </p>
         <ProfileForm initialValues={initialValues} submitLabel="Continuar" onSubmit={onComplete} />
         {onBack ? (

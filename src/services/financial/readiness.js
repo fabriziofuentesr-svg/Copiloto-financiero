@@ -1,101 +1,59 @@
-function monthKey(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
+import { getFinancialHealthInputs, getMonthlyComparison, projectCashFlow, summarizePeriod } from "./calculations.js";
+import { endOfMonth, startOfMonth } from "./format.js";
+import { getRealMovementProgress } from "./ledger.js";
 
 export function summarizeMonthKey(state, key) {
-  const transactions = (state.transactions || []).filter((transaction) => monthKey(transaction.date) === key);
-  const incomes = transactions.filter((transaction) => transaction.type === "ingreso");
-  const expenses = transactions.filter((transaction) => transaction.type === "gasto");
-  const ingresos = incomes.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  const gastos = expenses.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0);
-  return {
-    key,
-    transactionCount: transactions.length,
-    hasIncomeData: incomes.length > 0,
-    hasExpenseData: expenses.length > 0,
-    ingresos,
-    gastos,
-    ahorro: incomes.length > 0 && expenses.length > 0 ? ingresos - gastos : null,
-  };
+  const [year, month] = key.split("-").map(Number);
+  return { key, ...summarizePeriod(state, new Date(year, month - 1, 1), new Date(year, month, 0)) };
 }
 
-export function getComparableMonths(state) {
-  const keys = [...new Set((state.transactions || []).map((transaction) => monthKey(transaction.date)).filter(Boolean))]
-    .sort()
-    .reverse();
-  const completeMonths = keys
-    .map((key) => summarizeMonthKey(state, key))
-    .filter((month) => month.hasIncomeData && month.hasExpenseData);
-  if (completeMonths.length < 2) return null;
-  return { current: completeMonths[0], previous: completeMonths[1] };
+export function getComparableMonths(state, referenceDate = new Date()) {
+  const comparison = getMonthlyComparison(state, referenceDate);
+  return comparison.available ? { current: comparison.current, previous: comparison.previous, ...comparison } : null;
 }
 
-export function getLatestMonthSummary(state) {
-  const key = [...new Set((state.transactions || []).map((transaction) => monthKey(transaction.date)).filter(Boolean))]
-    .sort()
-    .reverse()[0];
-  return key ? summarizeMonthKey(state, key) : null;
+export function getLatestMonthSummary(state, referenceDate = new Date()) {
+  const summary = summarizePeriod(state, startOfMonth(referenceDate), endOfMonth(referenceDate));
+  return { ...summary, key: summary.start.slice(0, 7) };
 }
 
-export function getFinancialDataReadiness(state) {
+export function getFinancialDataReadiness(state, referenceDate = new Date()) {
   const settings = state.financialSettings || {};
-  const transactions = state.transactions || [];
-  const latestMonth = getLatestMonthSummary(state);
-  const hasAccounts = (state.accounts || []).length > 0;
-  const hasIncomeData = Boolean(latestMonth?.hasIncomeData);
-  const hasExpenseData = Boolean(latestMonth?.hasExpenseData);
-  const essentialIds = settings.essentialCategoryIds || [];
-  const hasEssentialTransactions = transactions.some(
-    (transaction) => transaction.type === "gasto" && monthKey(transaction.date) === latestMonth?.key && essentialIds.includes(transaction.category),
-  );
-  const hasEssentialExpenses = Boolean(settings.essentialExpensesConfigured) && essentialIds.length > 0 && hasEssentialTransactions;
+  const progress = getRealMovementProgress(state);
+  const latestMonth = getLatestMonthSummary(state, referenceDate);
+  const comparison = getMonthlyComparison(state, referenceDate);
+  const healthInputs = getFinancialHealthInputs(state, referenceDate);
+  const monthEndProjection = projectCashFlow(state, { mode: "month_end", referenceDate });
+  const rollingProjection = projectCashFlow(state, { mode: "rolling_30", referenceDate });
+  const hasAccounts = (state.accounts || []).some((account) => account.type !== "tarjeta_credito");
+  const hasEssentialExpenses = Boolean(settings.essentialExpensesConfigured) && healthInputs.essentialExpenses > 0;
   const hasSavingsGoal = Number(settings.savingsTargetValue) > 0;
-  const hasDebtConfiguration = settings.debtStatus === "none" || (settings.debtStatus === "has_debt" && (state.debts || []).length > 0);
+  const hasDebtConfiguration = settings.debtStatus === "none" || (settings.debtStatus === "has_debt" && healthInputs.missing.every((item) => item !== "los detalles de tus deudas"));
   const hasEmergencyTarget = Boolean(state.emergencyFund?.configured);
-  const comparableMonths = getComparableMonths(state);
-  const canCompareMonths = Boolean(comparableMonths);
-  const expectedIncome = Number(settings.projection?.expectedMonthlyIncome || state.profile?.estimatedMonthlyIncome) || 0;
-  const rawExpenseForecast = settings.projection?.expectedVariableExpenses;
-  const hasExpenseForecast = rawExpenseForecast !== null && rawExpenseForecast !== undefined && rawExpenseForecast !== "" && Number.isFinite(Number(rawExpenseForecast));
-  const canCalculateProjection = hasAccounts && expectedIncome > 0 && hasExpenseForecast;
-  const canCalculateFinancialHealth =
-    hasAccounts && hasIncomeData && hasExpenseData && hasEssentialExpenses && hasSavingsGoal && hasDebtConfiguration && hasEmergencyTarget;
-
-  const healthMissing = [];
-  if (!hasAccounts) healthMissing.push("una cuenta con saldo");
-  if (!hasIncomeData) healthMissing.push("ingresos registrados");
-  if (!hasExpenseData) healthMissing.push("gastos registrados");
-  if (!hasEssentialExpenses) healthMissing.push("tus gastos esenciales");
-  if (!hasSavingsGoal) healthMissing.push("una meta personal de ahorro");
-  if (!hasDebtConfiguration) healthMissing.push(settings.debtStatus === "has_debt" ? "los detalles de tus deudas" : "si actualmente tienes deudas");
-  if (!hasEmergencyTarget) healthMissing.push("tu objetivo de fondo de emergencia");
-
-  const projectionMissing = [];
-  if (!hasAccounts) projectionMissing.push("una cuenta con saldo");
-  if (!(expectedIncome > 0)) projectionMissing.push("tus ingresos esperados");
-  if (!hasExpenseForecast) projectionMissing.push("tus gastos variables esperados");
 
   return {
     hasAccounts,
-    hasIncomeData,
-    hasExpenseData,
+    hasIncomeData: progress.hasIncome,
+    hasExpenseData: progress.hasExpense,
     hasEssentialExpenses,
     hasSavingsGoal,
     hasDebtConfiguration,
     hasEmergencyTarget,
-    hasTwoComparableMonths: canCompareMonths,
-    canCompareMonths,
-    canCalculateFinancialHealth,
-    canCalculateProjection,
-    comparableMonths,
+    hasTwoComparableMonths: comparison.available,
+    canCompareMonths: comparison.available,
+    canCalculateFinancialHealth: healthInputs.missing.length === 0,
+    canCalculateProjection: rollingProjection.available,
+    comparison,
+    comparableMonths: comparison.available ? { current: comparison.current, previous: comparison.previous } : null,
     latestMonth,
-    healthMissing,
-    projectionMissing,
+    healthMissing: healthInputs.missing,
+    projectionMissing: rollingProjection.missing,
+    monthEndProjection,
+    rollingProjection,
+    firstMovements: progress,
   };
 }
 
-export function canCalculateFinancialHealth(state) {
-  return getFinancialDataReadiness(state).canCalculateFinancialHealth;
+export function canCalculateFinancialHealth(state, referenceDate = new Date()) {
+  return getFinancialDataReadiness(state, referenceDate).canCalculateFinancialHealth;
 }

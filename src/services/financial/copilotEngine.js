@@ -1,9 +1,5 @@
-// Motor de respuestas del Copiloto. Es una capa de reglas por
-// palabras clave sobre los mismos datos financieros del usuario — no un
-// chatbot genérico. Está aislado para poder sustituirlo después por una
-// llamada real a la API de Claude sin tocar la UI del chat.
-import { calculateAvailableMoney, calculateFinancialHealth, getCategoryTrends, projectBalance, hasFinancialData } from "./calculations.js";
-import { getFinancialDataReadiness } from "./readiness.js";
+import { calculateAvailableMoney, calculateFinancialHealth, getCategoryTrends, getMonthlyComparison, projectCashFlow, summarizePeriod } from "./calculations.js";
+import { startOfMonth } from "./format.js";
 import { evaluatePurchase } from "./purchaseAdvisor.js";
 import { estimateGoalCompletion } from "./goals.js";
 import { fmtBs, fmtPct } from "./format.js";
@@ -11,109 +7,96 @@ import { fmtBs, fmtPct } from "./format.js";
 export function parseLocalizedAmount(value) {
   const raw = String(value ?? "").replace(/\s/g, "");
   if (!raw) return null;
-
   let normalized = raw;
   const lastComma = raw.lastIndexOf(",");
   const lastDot = raw.lastIndexOf(".");
-  if (lastComma >= 0 && lastDot >= 0) {
-    // El separador que aparece al final suele ser el decimal.
-    if (lastComma > lastDot) normalized = raw.replace(/\./g, "").replace(",", ".");
-    else normalized = raw.replace(/,/g, "");
-  } else if (lastComma >= 0) {
-    const parts = raw.split(",");
-    normalized = parts.length > 2 || parts[parts.length - 1].length === 3
-      ? raw.replace(/,/g, "")
-      : raw.replace(",", ".");
-  } else if (lastDot >= 0) {
-    normalized = /^\d{1,3}(?:\.\d{3})+$/.test(raw) ? raw.replace(/\./g, "") : raw;
-  }
-
+  if (lastComma >= 0 && lastDot >= 0) normalized = lastComma > lastDot ? raw.replace(/\./g, "").replace(",", ".") : raw.replace(/,/g, "");
+  else if (lastComma >= 0) normalized = raw.split(",").length > 2 || raw.split(",").at(-1).length === 3 ? raw.replace(/,/g, "") : raw.replace(",", ".");
+  else if (lastDot >= 0) normalized = /^\d{1,3}(?:\.\d{3})+$/.test(raw) ? raw.replace(/\./g, "") : raw;
   const amount = Number(normalized);
   return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
-// Prioriza importes asociados a una moneda o a palabras de precio. Así
-// "iPhone 14 de Bs 8000" usa 8000 y no el número del modelo.
 export function extractAmount(text) {
   const source = String(text ?? "").toLowerCase();
-  const moneyPattern = /(?:bs\.?|bob|usd|us\$|\$)\s*([\d.,]+)|([\d.,]+)\s*(?:bs\.?|bob|usd|us\$|\$)/gi;
-  const moneyMatches = [...source.matchAll(moneyPattern)];
-  if (moneyMatches.length > 0) {
-    const raw = moneyMatches[moneyMatches.length - 1][1] || moneyMatches[moneyMatches.length - 1][2];
-    return parseLocalizedAmount(raw);
-  }
-
-  const numberMatches = [...source.matchAll(/\d+(?:[.,]\d+)?/g)];
-  const modelPattern = /\b(?:iphone|ipod|ipad|galaxy|pixel|redmi|xiaomi|playstation|xbox|macbook|matebook|surface|modelo|serie|ps)\s*(?:[a-z-]+\s*)?(\d{1,4})\b/i;
-  const modelNumber = source.match(modelPattern)?.[1];
-  const candidates = numberMatches.filter((match) => match[0] !== modelNumber);
-  if (candidates.length === 0) return null;
-  return parseLocalizedAmount(candidates[candidates.length - 1][0]);
+  const moneyMatches = [...source.matchAll(/(?:bs\.?|bob|usd|us\$|\$)\s*([\d.,]+)|([\d.,]+)\s*(?:bs\.?|bob|usd|us\$|\$)/gi)];
+  if (moneyMatches.length) return parseLocalizedAmount(moneyMatches.at(-1)[1] || moneyMatches.at(-1)[2]);
+  const modelNumber = source.match(/\b(?:iphone|ipad|galaxy|pixel|playstation|xbox|macbook|modelo|serie|ps)\s*(?:[a-z-]+\s*)?(\d{1,4})\b/i)?.[1];
+  const candidates = [...source.matchAll(/\d+(?:[.,]\d+)?/g)].filter((match) => match[0] !== modelNumber);
+  return candidates.length ? parseLocalizedAmount(candidates.at(-1)[0]) : null;
 }
 
-export function answerQuestion(state, question) {
-  if (!hasFinancialData(state)) {
-    return "Todavía no tengo datos financieros tuyos. Registra tus ingresos y gastos en Movimientos (o agrega una cuenta en Cuentas) y podré darte respuestas basadas en tu situación real.";
-  }
+function includesAny(text, terms) {
+  return terms.some((term) => text.includes(term));
+}
 
-  const q = question.toLowerCase();
+export function answerQuestion(state, question, referenceDate = new Date()) {
+  const q = String(question || "").toLowerCase().trim();
   const currency = state.profile?.currency || "BOB";
   const unit = currency === "USD" ? "USD" : "Bs";
-  const { available } = calculateAvailableMoney(state);
-  const health = calculateFinancialHealth(state);
-  const readiness = getFinancialDataReadiness(state);
-  const { ingresos = 0, gastos = 0, ahorro = null } = readiness.latestMonth || {};
-  const requestedGoal = (state.goals || []).find((item) => q.includes(String(item.name || "").toLowerCase()));
+  const cash = calculateAvailableMoney(state, referenceDate);
+  const health = calculateFinancialHealth(state, referenceDate);
+  const current = summarizePeriod(state, startOfMonth(referenceDate), referenceDate);
+  const requestedGoal = (state.goals || []).find((goal) => q.includes(String(goal.name || "").toLowerCase()));
 
-  if (q.includes("puedo comprar") || q.includes("puedo permitirme") || (q.includes("comprar") && /\d/.test(q))) {
-    const amount = extractAmount(q);
-    if (!amount) {
-      return "Decime el monto de la compra (por ejemplo: '¿puedo comprar algo de " + unit + " 500?') y te digo si te conviene ahora.";
+  if (includesAny(q, ["puedo comprar", "puedo permitirme"]) || (q.includes("comprar") && /\d/.test(q))) {
+    const purchaseAmount = extractAmount(q);
+    if (!purchaseAmount) return `Entendí que quieres evaluar una compra. Indícame el precio, por ejemplo: “¿Puedo comprarlo por ${unit} 500?”.`;
+    const result = evaluatePurchase(state, purchaseAmount, referenceDate);
+    const emoji = result.verdict === "si" ? "🟢" : result.verdict === "precaucion" ? "🟡" : result.verdict === "incomplete" ? "ℹ️" : "🔴";
+    const missing = result.missing.length ? ` Falta completar: ${result.missing.join(", ")}.` : "";
+    return `${emoji} ${result.label}. Disponible antes: ${fmtBs(result.availableBefore, currency)}; después: ${fmtBs(result.availableAfter, currency)}. ${result.explanation}${missing}`;
+  }
+
+  if (q.includes("ahorrar") || q.includes("capacidad de ahorro")) {
+    const requestedAmount = extractAmount(q);
+    if (!current.hasIncomeData || !current.hasExpenseData) return "Entendí que quieres evaluar tu ahorro. Necesito un ingreso real y un gasto real del mes para calcularlo con tus datos.";
+    const capacity = Math.max(0, Math.min(current.balanceNeto, cash.available));
+    if (requestedAmount !== null) {
+      const remaining = cash.available - requestedAmount;
+      const covered = requestedAmount <= capacity;
+      return `${covered ? "Sí, de forma condicional" : "No por ahora"}. Para ahorrar ${fmtBs(requestedAmount, currency)} usaría un balance neto mensual de ${fmtBs(current.balanceNeto, currency)} y un disponible de ${fmtBs(cash.available, currency)}. Quedarían ${fmtBs(remaining, currency)} después del aporte; tus compromisos próximos suman ${fmtBs(cash.committed, currency)}.${health.available ? " La reserva y la deuda ya están incorporadas en tu evaluación financiera." : ` Falta completar: ${health.missing.join(", ")}.`}`;
     }
-    const veredicto = evaluatePurchase(state, amount);
-    const emoji = veredicto.verdict === "si" ? "🟢" : veredicto.verdict === "precaucion" ? "🟡" : "🔴";
-    return `${emoji} ${veredicto.label}. ${veredicto.explanation}`;
+    return `Tu capacidad conservadora de ahorro este mes es ${fmtBs(Math.max(0, capacity), currency)}: balance neto ${fmtBs(current.balanceNeto, currency)} y disponible después de compromisos ${fmtBs(cash.available, currency)}.`;
   }
 
-  if (q.includes("cuánto puedo ahorrar") || q.includes("cuanto puedo ahorrar")) {
-    if (ahorro === null) return "Necesito al menos un ingreso y un gasto reales del mismo mes para estimar cuánto podrías ahorrar.";
-    return `A tu ritmo actual, este mes te quedarían aproximadamente ${fmtBs(ahorro, currency)} después de tus gastos (ingresos ${fmtBs(ingresos, currency)}, gastos ${fmtBs(gastos, currency)}).`;
+  if (includesAny(q, ["por qué gasté", "por que gaste", "gasté más", "gaste mas", "evolución", "evolucion"])) {
+    const comparison = getMonthlyComparison(state, referenceDate);
+    if (!comparison.available) return "Entendí que quieres comparar tu evolución. Necesito ingresos y gastos reales tanto este mes como en el mismo tramo del mes anterior.";
+    const trends = getCategoryTrends(state, referenceDate).filter((trend) => trend.change !== null).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+    if (!trends.length) return `Comparé ${comparison.current.start}–${comparison.current.end} con ${comparison.previous.start}–${comparison.previous.end}, pero aún no hay una categoría con base suficiente para explicar el cambio.`;
+    const top = trends[0];
+    return `${top.name} pasó de ${fmtBs(top.previous, currency)} a ${fmtBs(top.current, currency)} (${fmtPct(top.change)}). La comparación usa mes a la fecha contra los mismos días del mes anterior y tiene confianza ${comparison.confidence}.`;
   }
 
-  if (q.includes("por qué gasté") || q.includes("por que gaste") || q.includes("gasté más") || q.includes("gaste mas")) {
-    if (!readiness.canCompareMonths) return "Necesito ingresos y gastos reales de al menos dos meses distintos para explicar cambios entre períodos.";
-    const trends = getCategoryTrends(state).filter((t) => t.change > 0.15).sort((a, b) => b.change - a.change);
-    if (trends.length === 0) return "No veo aumentos importantes este mes respecto al anterior. Tus gastos se mantienen parecidos.";
-    const top = trends.slice(0, 2).map((t) => `${t.name.toLowerCase()} (${fmtPct(t.change)})`).join(" y ");
-    return `El aumento se explica principalmente por ${top} frente al mes pasado.`;
+  if (q.includes("salud")) {
+    if (!health.available) return `La Salud financiera aún no está disponible. Falta completar: ${health.missing.join(", ")}.`;
+    const components = Object.entries(health.breakdown).map(([key, value]) => `${key}: ${value.score}%`).join(", ");
+    return `Tu Salud financiera es ${health.score}% con confianza ${health.confidence}. Componentes: ${components}. ${health.resumen}`;
+  }
+
+  if (includesAny(q, ["proyección", "proyeccion", "cómo estaré", "como estare", "30 días", "fin de mes"])) {
+    const mode = q.includes("fin de mes") ? "month_end" : "rolling_30";
+    const projection = projectCashFlow(state, { mode, referenceDate });
+    if (!projection.available) return `Entendí que quieres una proyección. Falta completar: ${projection.missing.join(", ")}.`;
+    return `Del ${projection.startDate} al ${projection.endDate} (${projection.days} días), el saldo pasaría de ${fmtBs(projection.start, currency)} a ${fmtBs(projection.end, currency)}. Sumé ${fmtBs(projection.expectedIncome, currency)} de ingresos y resté ${fmtBs(projection.commitments + projection.expectedVariableExpenses, currency)}. Confianza: ${projection.confidence}.`;
   }
 
   if (q.includes("objetivo") || q.includes("meta") || requestedGoal) {
     const goal = requestedGoal || (state.goals || [])[0];
-    if (!goal) return "Todavía no tienes objetivos creados. Puedes agregar uno desde la sección Planes.";
-    const est = estimateGoalCompletion(goal);
-    if (est.months === null) {
-      return "Tu objetivo \"" + goal.name + "\" todavía no tiene un aporte mensual. Define un aporte mayor a cero en Planes para calcular cuándo lo alcanzarías.";
-    }
-    return `A tu ritmo actual (${fmtBs(goal.monthlyContribution, currency)}/mes) alcanzarías "${goal.name}" en ${est.months} meses, alrededor de ${est.date?.toLocaleDateString("es-BO", { month: "long", year: "numeric" })}. Si aumentas el aporte mensual, llegas antes — puedes probarlo en el simulador de la meta.`;
+    if (!goal) return "Entendí que preguntas por un objetivo. Crea uno en Planes e indica monto y aporte mensual.";
+    const estimate = estimateGoalCompletion(goal);
+    if (estimate.months === null) return `“${goal.name}” no tiene un aporte mensual mayor a cero. Edítalo en Planes para calcular su fecha.`;
+    return `Con ${fmtBs(goal.monthlyContribution, currency)} al mes, alcanzarías “${goal.name}” en ${estimate.months} meses. Para acelerarlo, aumenta el aporte mensual en el simulador de Planes.`;
   }
 
-  if (q.includes("deuda") && (q.includes("priorizar") || q.includes("primero"))) {
-    const worst = [...(state.debts || [])].sort((a, b) => b.rate - a.rate)[0];
-    if (!worst) return "No tienes deudas registradas.";
-    return `Prioriza "${worst.name}": tiene la tasa más alta (${worst.rate}% anual), así que es la que más te cuesta mantener con el tiempo.`;
+  if (q.includes("deuda") && includesAny(q, ["priorizar", "primero", "pagar"])) {
+    const debts = [...(state.debts || []), ...(state.accounts || []).filter((account) => account.type === "tarjeta_credito" && Number(account.balance) < 0).map((account) => ({ name: account.name, balance: Math.abs(account.balance), rate: account.rate || 0 }))];
+    const priority = debts.sort((a, b) => Number(b.rate) - Number(a.rate) || Number(b.balance) - Number(a.balance))[0];
+    return priority ? `Prioriza “${priority.name}”: es la obligación con mayor costo conocido o mayor saldo. Revisa su tasa y pago mínimo en Planes o Cuentas.` : "No encuentro deudas registradas. Si tienes una tarjeta con saldo utilizado, completa sus datos en Cuentas.";
   }
 
-  if (q.includes("disponible") || q.includes("cuánto tengo") || q.includes("cuanto tengo")) {
-    return `Hoy tienes ${fmtBs(available, currency)} realmente disponibles, después de restar tus próximos compromisos de tu saldo total.`;
-  }
+  if (includesAny(q, ["disponible", "cuánto tengo", "cuanto tengo", "saldo real"])) return `Tienes ${fmtBs(cash.available, currency)} disponibles después de reservar ${fmtBs(cash.committed, currency)} para compromisos de los próximos 30 días.`;
 
-  if (q.includes("6 meses") || q.includes("proyección") || q.includes("proyeccion") || q.includes("cómo estaré") || q.includes("como estare")) {
-    const projection = projectBalance(state, 180);
-    if (!projection.available) return `La proyección aún no está disponible. Completa ${projection.missing.join(", ")} desde Análisis para calcularla.`;
-    return `Proyectando tus ingresos y gastos actuales a 180 días, tu saldo estimado rondaría los ${fmtBs(projection.end, currency)}. ${projection.atRisk ? "Ojo: en el camino hay un punto donde tu liquidez podría caer por debajo de cero." : "El camino se ve estable, sin caídas fuertes de liquidez en el medio."}`;
-  }
-
-  if (!health.available) return `Tu salud financiera aún no está disponible. Completa ${health.missing.join(", ")} desde Análisis. Mientras tanto, puedo decirte cuánto dinero tienes disponible o ayudarte con tus objetivos.`;
-  return `Tu salud financiera hoy es de ${health.score}% (${health.resumen}) Puedo ayudarte con preguntas como cuánto puedes gastar, si te conviene una compra, qué deuda priorizar o cómo va tu objetivo de ahorro.`;
+  return "Entendí que buscas orientación financiera, pero necesito una consulta más concreta. Puedes preguntarme: “¿Cuánto tengo disponible?”, “¿Puedo ahorrar Bs 1.000?”, “Explícame mi Salud financiera” o “Proyección a fin de mes”.";
 }

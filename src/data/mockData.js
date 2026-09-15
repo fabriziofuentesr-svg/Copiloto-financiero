@@ -13,6 +13,7 @@
 import { addDays } from "../services/financial/format.js";
 
 export const CATEGORIES = [
+  { id: "saldo_inicial", name: "Saldo inicial", type: "ingreso", essential: false, color: "#7A6A53", system: true },
   { id: "vivienda", name: "Vivienda", type: "gasto", essential: true, color: "#1F5C56" },
   { id: "alimentacion", name: "Alimentación", type: "gasto", essential: true, color: "#C1892E" },
   { id: "transporte", name: "Transporte", type: "gasto", essential: true, color: "#5C8A72" },
@@ -47,7 +48,7 @@ export const ACCOUNTS = [
   { id: "acc-banco", name: "Banco", type: "banco", balance: 3000, currency: "BOB" },
   { id: "acc-efectivo", name: "Efectivo", type: "efectivo", balance: 500, currency: "BOB" },
   { id: "acc-ahorro", name: "Cuenta de ahorro", type: "ahorro", balance: 4500, currency: "BOB" },
-  { id: "acc-tc", name: "Tarjeta de crédito", type: "tarjeta_credito", balance: -1200, currency: "BOB" },
+  { id: "acc-tc", name: "Tarjeta de crédito", type: "tarjeta_credito", balance: -1200, currency: "BOB", creditLimit: 5000, statementDay: 20, paymentDay: 25, minimumPayment: 450 },
 ];
 
 export const DEBTS = [
@@ -78,13 +79,18 @@ export const DEBTS = [
     paymentDay: 25,
     termMonths: null,
     remainingInstallments: null,
+    linkedAccountId: "acc-tc",
   },
 ];
 
 // Gastos fijos recurrentes (no son deuda, pero sí comprometen el dinero disponible)
 export const RECURRING_EXPENSES = [
-  { id: "rec-alquiler", name: "Alquiler", category: "vivienda", amount: 1200, dayOfMonth: 10 },
-  { id: "rec-servicios", name: "Servicios (luz, agua, internet)", category: "servicios", amount: 300, dayOfMonth: 20 },
+  { id: "rec-alquiler", name: "Alquiler", category: "vivienda", amount: 1200, dayOfMonth: 10, frequency: "mensual", active: true },
+  { id: "rec-servicios", name: "Servicios (luz, agua, internet)", category: "servicios", amount: 300, dayOfMonth: 20, frequency: "mensual", active: true },
+];
+
+export const RECURRING_INCOMES = [
+  { id: "rec-salario", name: "Salario", category: "salario", amount: 4000, dayOfMonth: 5, frequency: "mensual", active: true },
 ];
 
 export const GOALS = [
@@ -115,6 +121,7 @@ export const DEMO_PROFILE = {
 // Perfil inicial de un usuario que todavía no configuró nada.
 export function buildEmptyProfile() {
   return {
+    schemaVersion: 2,
     name: "",
     currency: "BOB",
     employmentType: "",
@@ -137,6 +144,10 @@ export function buildEmptyState() {
     goals: [],
     debts: [],
     recurringExpenses: [],
+    recurringIncomes: [],
+    savingsContributions: [],
+    processedRequestIds: [],
+    currencyHistory: [],
     emergencyFund: { current: 0, monthsTarget: 3, configured: false },
     financialSettings: {
       essentialExpensesConfigured: false,
@@ -144,7 +155,7 @@ export function buildEmptyState() {
       savingsTargetType: "percentage",
       savingsTargetValue: null,
       debtStatus: "unconfigured",
-      projection: { expectedMonthlyIncome: null, expectedVariableExpenses: null },
+      projection: { expectedMonthlyIncome: null, expectedVariableExpenses: null, nextIncomeDate: null, incomeFrequency: "mensual" },
     },
     sectionGuidesSeen: {},
     demoBackup: null,
@@ -156,6 +167,7 @@ export function buildEmptyState() {
 // carga automáticamente: hay que pedirlo explícitamente desde Configuración.
 export function buildDemoState() {
   return {
+    schemaVersion: 2,
     profile: DEMO_PROFILE,
     accounts: ACCOUNTS,
     transactions: TRANSACTIONS,
@@ -164,6 +176,10 @@ export function buildDemoState() {
     goals: GOALS,
     debts: DEBTS,
     recurringExpenses: RECURRING_EXPENSES,
+    recurringIncomes: RECURRING_INCOMES,
+    savingsContributions: [],
+    processedRequestIds: [],
+    currencyHistory: [],
     emergencyFund: EMERGENCY_FUND,
     financialSettings: {
       essentialExpensesConfigured: true,
@@ -171,7 +187,7 @@ export function buildDemoState() {
       savingsTargetType: "amount",
       savingsTargetValue: 650,
       debtStatus: "has_debt",
-      projection: { expectedMonthlyIncome: 4000, expectedVariableExpenses: 550 },
+      projection: { expectedMonthlyIncome: 4000, expectedVariableExpenses: 550, nextIncomeDate: null, incomeFrequency: "mensual" },
     },
     sectionGuidesSeen: {},
     demoBackup: null,
@@ -192,9 +208,9 @@ function generateTransactions() {
   const push = (t) => tx.push({ id: `tx-${id++}`, ...t });
 
   // Ingreso del mes actual
-  push({ description: "Salario", amount: 4000, date: day(-5), category: "salario", accountId: "acc-banco", paymentMethod: "transferencia", type: "ingreso" });
+  push({ description: "Salario", amount: 4000, date: day(-5), category: "salario", accountId: "acc-banco", paymentMethod: "transferencia", type: "ingreso", origin: "user", recurringId: "rec-salario" });
   // Ingreso del mes anterior (para comparación)
-  push({ description: "Salario", amount: 4000, date: day(-35), category: "salario", accountId: "acc-banco", paymentMethod: "transferencia", type: "ingreso" });
+  push({ description: "Salario", amount: 4000, date: day(-35), category: "salario", accountId: "acc-banco", paymentMethod: "transferencia", type: "ingreso", origin: "user", recurringId: "rec-salario" });
 
   // Gastos fijos ya registrados este mes
   push({ description: "Alquiler", amount: 1200, date: day(-8), category: "vivienda", accountId: "acc-banco", paymentMethod: "transferencia", type: "gasto" });

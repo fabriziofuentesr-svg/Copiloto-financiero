@@ -111,6 +111,8 @@ export function ProjectionSetupForm({ onSuccess }) {
   const knownIncome = Number(state.profile.estimatedMonthlyIncome) || 0;
   const [expectedIncome, setExpectedIncome] = useState(projection.expectedMonthlyIncome || knownIncome || "");
   const [variableExpenses, setVariableExpenses] = useState(projection.expectedVariableExpenses ?? "");
+  const [nextIncomeDate, setNextIncomeDate] = useState(projection.nextIncomeDate || "");
+  const [incomeFrequency, setIncomeFrequency] = useState(projection.incomeFrequency || "mensual");
   const recurring = (state.recurringExpenses || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const debtPayments = getTotalDebtInstallments(state);
 
@@ -119,7 +121,7 @@ export function ProjectionSetupForm({ onSuccess }) {
     const income = Number(expectedIncome);
     const expenses = Number(variableExpenses);
     if (!(income > 0) || !Number.isFinite(expenses) || expenses < 0) return;
-    dispatch({ type: "SET_PROJECTION_SETTINGS", payload: { expectedMonthlyIncome: income, expectedVariableExpenses: expenses } });
+    dispatch({ type: "SET_PROJECTION_SETTINGS", payload: { expectedMonthlyIncome: income, expectedVariableExpenses: expenses, nextIncomeDate, incomeFrequency } });
     onSuccess?.();
   }
 
@@ -132,6 +134,18 @@ export function ProjectionSetupForm({ onSuccess }) {
       <Field label="Gastos variables esperados por mes">
         <Input type="number" min="0" step="0.01" value={variableExpenses} onChange={(event) => setVariableExpenses(event.target.value)} required />
       </Field>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Próxima fecha de cobro">
+          <Input type="date" value={nextIncomeDate} onChange={(event) => setNextIncomeDate(event.target.value)} />
+        </Field>
+        <Field label="Recurrencia del ingreso">
+          <Select value={incomeFrequency} onChange={(event) => setIncomeFrequency(event.target.value)}>
+            <option value="mensual">Mensual</option>
+            <option value="quincenal">Quincenal</option>
+            <option value="semanal">Semanal</option>
+          </Select>
+        </Field>
+      </div>
       <div className="rounded bg-paper-raised p-3 text-xs text-ink-soft">
         Ya registrados: {fmtBs(recurring, state.profile.currency)} en gastos recurrentes y {fmtBs(debtPayments, state.profile.currency)} en pagos mensuales de deuda.
       </div>
