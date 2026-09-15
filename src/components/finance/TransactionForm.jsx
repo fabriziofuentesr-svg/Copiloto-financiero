@@ -31,10 +31,17 @@ export function TransactionForm({ initialType = "gasto", lockType = false, trans
       dispatch({ type: "UPDATE_TRANSACTION", payload: { id: transaction.id, ...form, description: form.description.trim(), amount: movementAmount } });
     } else {
       const recurringId = recurring ? `rec-${Date.now()}-${Math.floor(Math.random() * 10000)}` : null;
-      dispatch({ type: "ADD_TRANSACTION", payload: { ...form, description: form.description.trim(), amount: movementAmount, recurringId } });
       if (recurringId) {
         const date = parseDate(form.date);
-        dispatch({ type: "ADD_RECURRING_ITEM", payload: { id: recurringId, kind: form.type, name: form.description.trim(), category: form.category, amount: movementAmount, frequency: "mensual", dayOfMonth: date.getDate(), nextDate: localDateString(addMonths(date, 1)), active: true } });
+        dispatch({
+          type: "ADD_TRANSACTION_WITH_RECURRENCE",
+          payload: {
+            transaction: { ...form, description: form.description.trim(), amount: movementAmount, recurringId },
+            recurrence: { id: recurringId, kind: form.type, name: form.description.trim(), category: form.category, amount: movementAmount, frequency: "mensual", dayOfMonth: date.getDate(), nextDate: localDateString(addMonths(date, 1)), active: true },
+          },
+        });
+      } else {
+        dispatch({ type: "ADD_TRANSACTION", payload: { ...form, description: form.description.trim(), amount: movementAmount, recurringId: null } });
       }
       setForm(buildInitialForm(state, form.type));
     }
