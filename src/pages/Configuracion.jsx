@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { HelpCircle } from "lucide-react";
-import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.jsx";
+import { useFinanceState, useFinanceDispatch, useFinanceMeta } from "../context/FinanceContext.jsx";
 import { Card, Button, Modal } from "../components/ui/primitives.jsx";
 import { ProfileForm } from "../onboarding/ProfileSetup.jsx";
 import { GuideCarousel } from "../onboarding/GuideCarousel.jsx";
 import { SectionGuide } from "../components/SectionGuide.jsx";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { hasFinancialData } from "../services/financial/calculations.js";
 import { fmtBs } from "../services/financial/format.js";
 import { useAuth } from "../auth/AuthContext.jsx";
@@ -22,6 +22,8 @@ export default function Configuracion() {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
   const auth = useAuth();
+  const meta = useFinanceMeta();
+  const navigate = useNavigate();
   const [editando, setEditando] = useState(false);
   const [guiaAbierta, setGuiaAbierta] = useState(false);
   const [dataError, setDataError] = useState("");
@@ -84,7 +86,7 @@ export default function Configuracion() {
           {auth.user ? <Button variant="secondary" onClick={async () => {
             setDataError("");
             try {
-              const data = await createFinanceRepository(auth.user).exportData();
+              const data = await createFinanceRepository(auth).exportData();
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
               const link = document.createElement("a");
@@ -125,7 +127,19 @@ export default function Configuracion() {
         </div>
       </Card>
 
-      {auth.user ? <Card title="Sesión"><p className="text-sm text-ink-soft mb-3">Sesión vinculada con {auth.user.email || "tu cuenta de Google"}.</p><Button variant="secondary" onClick={auth.signOut}>Cerrar sesión</Button><p className="mt-3 text-xs text-ink-soft">La eliminación completa de la cuenta requiere definir primero la política legal de retención. No se ejecuta desde esta pantalla.</p></Card> : null}
+      <Card title="Cuenta y sesión">
+        {auth.status === "authenticated" ? <>
+          <div className="mb-4 flex flex-col gap-1 text-sm"><Row label="Nombre" value={auth.user.user_metadata?.name || state.profile.name || "—"} /><Row label="Correo" value={auth.user.email || "—"} /><Row label="Proveedor" value={auth.user.app_metadata?.provider === "google" ? "Google" : "Correo y contraseña"} /></div>
+          <Button variant="secondary" onClick={auth.signOut}>Cerrar sesión</Button>
+          {meta.migration.available && meta.migration.status === "dismissed" ? <p className="mt-3 rounded bg-ochre/10 p-3 text-xs">Hay datos de invitado pendientes. Se conservarán localmente hasta que decidas importarlos en una próxima sesión.</p> : null}
+          <p className="mt-3 text-xs text-ink-soft">La eliminación completa de la cuenta requiere definir primero la política legal de retención.</p>
+        </> : <>
+          <p className="font-medium">Estás usando Copiloto Financiero como invitado</p>
+          <p className="my-3 text-sm text-ink-soft">Tus datos están guardados únicamente en este navegador y no se sincronizan con otros dispositivos.</p>
+          <div className="flex flex-wrap gap-2"><Button onClick={() => { auth.leaveGuest(); navigate("/login?view=signup"); }}>Crear una cuenta</Button><Button variant="secondary" onClick={() => { auth.leaveGuest(); navigate("/login?view=signin"); }}>Iniciar sesión</Button></div>
+          <Button variant="danger" className="mt-3" onClick={() => { if (confirm("Se eliminarán definitivamente todos los datos del modo invitado guardados en este navegador. No podrán recuperarse. ¿Continuar?")) { meta.clearGuestData(); auth.leaveGuest(); navigate("/login", { replace: true }); } }}>Eliminar datos de invitado</Button>
+        </>}
+      </Card>
 
       <Modal open={guiaAbierta} onClose={() => setGuiaAbierta(false)} title="Guía rápida">
         <GuideCarousel onFinish={() => setGuiaAbierta(false)} onSkip={() => setGuiaAbierta(false)} />

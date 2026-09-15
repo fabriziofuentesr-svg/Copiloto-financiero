@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { safeReturnPath, authUiState } from "../src/auth/authState.js";
+import { AUTH_STATUS, safeReturnPath, authUiState, publicAuthError, validateSignIn, validateSignUp } from "../src/auth/authState.js";
 import { assertFinanceRepository } from "../src/repositories/contracts.js";
 import { createLocalFinanceRepository } from "../src/repositories/localFinanceRepository.js";
 import { createSupabaseFinanceRepository } from "../src/repositories/supabaseFinanceRepository.js";
@@ -22,9 +22,19 @@ test("las redirecciones de OAuth solo aceptan rutas internas", () => {
 
 test("los estados de autenticación no muestran datos mientras carga o falla", () => {
   assert.equal(authUiState({ loading: true, user: { id: "a" } }), "loading");
-  assert.equal(authUiState({ loading: false, user: null }), "anonymous");
+  assert.equal(authUiState({ loading: false, user: null }), "unauthenticated");
+  assert.equal(authUiState({ loading: false, user: null, guest: true }), "guest");
   assert.equal(authUiState({ loading: false, user: { id: "a" } }), "authenticated");
-  assert.equal(authUiState({ loading: false, user: null, error: "expired" }), "error");
+  assert.deepEqual(Object.values(AUTH_STATUS), ["loading", "authenticated", "guest", "unauthenticated"]);
+});
+
+test("inicio de sesión y registro validan sin enviar formularios incompletos", () => {
+  assert.deepEqual(validateSignIn({ email: "mal", password: "" }), { email: "Ingresa un correo electrónico válido.", password: "Ingresa tu contraseña." });
+  assert.deepEqual(validateSignUp({ name: "", email: "ana@example.com", password: "123", confirmation: "456" }), {
+    password: "La contraseña debe tener al menos 6 caracteres.", name: "Ingresa tu nombre.", confirmation: "Las contraseñas no coinciden.",
+  });
+  assert.deepEqual(validateSignUp({ name: "Ana", email: "ana@example.com", password: "secreto", confirmation: "secreto" }), {});
+  assert.equal(publicAuthError({ message: "Invalid login credentials" }), "No pudimos completar el acceso. Revisa los datos e intenta nuevamente.");
 });
 
 test("el adaptador local conserva el contrato y los datos anteriores", async () => {
@@ -34,6 +44,18 @@ test("el adaptador local conserva el contrato y los datos anteriores", async () 
   state.profile.name = "Ana";
   await repository.apply({ nextState: state });
   assert.equal((await repository.load()).profile.name, "Ana");
+  assert.deepEqual((await repository.load()).localOwner, { type: "guest", version: 1 });
+  assert.equal(globalThis.localStorage.getItem("copiloto-financiero:estado-financiero-v1"), null);
+});
+
+test("los datos del invitado permanecen aislados y se detectan para importación", async () => {
+  globalThis.localStorage = memoryStorage();
+  const state = buildEmptyState(); state.profile.name = "Invitado"; state.profile.onboardingCompleted = true;
+  await createLocalFinanceRepository().apply({ nextState: state });
+  const migration = inspectLocalMigration();
+  assert.equal(migration.available, true);
+  assert.equal(migration.sourceKey, "invitado-financiero-v1");
+  assert.equal(migration.state.profile.name, "Invitado");
 });
 
 test("el repositorio remoto usa RPC autenticadas y conserva revisión", async () => {
@@ -90,4 +112,20 @@ test("las rutas privadas, login y callback están instalados", async () => {
   assert.match(app, /path="\/auth\/callback"/);
   assert.match(app, /ProtectedApplication/);
   assert.match(app, /returnTo/);
+});
+
+test("la experiencia de acceso contiene correo, registro, Google e invitado", async () => {
+  const [login, auth, factory, settings, migrationPrompt] = await Promise.all([
+    readFile(new URL("../src/pages/Login.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/auth/AuthContext.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/repositories/factory.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/pages/Configuracion.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/LocalMigrationPrompt.jsx", import.meta.url), "utf8"),
+  ]);
+  for (const text of ["Iniciar sesión", "Regístrate", "Continuar con Google", "Continuar como invitado", "Crear una cuenta", "¿Olvidaste tu contraseña?"]) assert.match(login, new RegExp(text.replace(/[?]/g, "\\?")));
+  assert.match(auth, /signInWithPassword/); assert.match(auth, /signUpWithPassword/); assert.match(auth, /resetPasswordForEmail/);
+  assert.match(factory, /status === "guest"/); assert.match(factory, /status !== "authenticated"/);
+  assert.match(settings, /Eliminar datos de invitado/); assert.match(settings, /Cuenta y sesión/);
+  assert.match(migrationPrompt, /Confirmar importación/); assert.match(migrationPrompt, /Decidir más tarde/);
+  assert.doesNotMatch(auth, /localStorage.*password|password.*localStorage/i);
 });

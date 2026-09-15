@@ -31,10 +31,8 @@ function ProtectedApplication() {
   const meta = useFinanceMeta();
   const auth = useAuth();
   const location = useLocation();
-  const localMode = import.meta.env.VITE_DATA_MODE === "local";
-
   if (auth.loading || meta.status === "loading") return <main className="min-h-screen grid place-items-center bg-paper"><p role="status">Cargando tu información…</p></main>;
-  if (!localMode && !auth.user) return <Navigate to="/login" replace state={{ returnTo: `${location.pathname}${location.search}` }} />;
+  if (auth.status === "unauthenticated") return <Navigate to="/login" replace state={{ returnTo: `${location.pathname}${location.search}` }} />;
 
   // Usuario nuevo / no configurado: bienvenida -> configuración -> guía.
   // No usa rutas propias a propósito, para no interferir con la navegación

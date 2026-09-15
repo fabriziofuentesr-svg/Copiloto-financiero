@@ -7,6 +7,8 @@ import { useAuth } from "../auth/AuthContext.jsx";
 import { createFinanceRepository } from "../repositories/factory.js";
 import { DATA_STATUS } from "../repositories/contracts.js";
 import { createLocalBackup, fingerprintState, inspectLocalMigration, migrationId, removeMigratedLocalData } from "../services/import/localMigration.js";
+import { GUEST_STATE_KEY } from "../repositories/localFinanceRepository.js";
+import { clearState } from "../services/storage.js";
 
 const FinanceStateContext = createContext(null);
 const FinanceDispatchContext = createContext(null);
@@ -374,7 +376,7 @@ export function FinanceProvider({ children }) {
   useEffect(() => {
     let active = true;
     repositoryGenerationRef.current += 1;
-    const repository = createFinanceRepository(auth.user);
+    const repository = createFinanceRepository(auth);
     repositoryRef.current = repository;
     if (!repository) {
       const empty = buildEmptyState();
@@ -419,7 +421,7 @@ export function FinanceProvider({ children }) {
       active = false;
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
-  }, [auth.user?.id]);
+  }, [auth.status, auth.user?.id]);
 
   const dispatch = useCallback((action) => {
     const mutation = async () => {
@@ -475,7 +477,19 @@ export function FinanceProvider({ children }) {
     }
   }, [migration.state]);
 
-  const meta = useMemo(() => ({ status, message, migration, importLocal, dismissMigration: () => setMigration((current) => ({ ...current, status: "dismissed" })), removeLocalCopy: () => { removeMigratedLocalData(migration.backupKey); setMigration((current) => ({ ...current, status: "dismissed", available: false })); }, clearMessage: () => setMessage("") }), [status, message, migration, importLocal]);
+  const meta = useMemo(() => ({
+    status, message, migration, repositoryMode: repositoryRef.current?.mode || null,
+    importLocal,
+    dismissMigration: () => setMigration((current) => ({ ...current, status: "dismissed" })),
+    removeLocalCopy: () => { removeMigratedLocalData(migration.backupKey, migration.sourceKey); setMigration((current) => ({ ...current, status: "dismissed", available: false })); },
+    clearGuestData: () => {
+      clearState(GUEST_STATE_KEY);
+      const empty = buildEmptyState();
+      stateRef.current = empty;
+      baseDispatch({ type: "LOAD_STATE", payload: empty });
+    },
+    clearMessage: () => setMessage(""),
+  }), [status, message, migration, importLocal]);
 
   return (
     <FinanceStateContext.Provider value={state}>

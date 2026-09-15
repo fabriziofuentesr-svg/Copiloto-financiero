@@ -41,7 +41,7 @@ export function Modal({ open, onClose, title, children }) {
     const focusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
     dialog?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])")?.focus();
     function onKeyDown(event) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && onClose) onClose();
       if (event.key === "Tab") {
         const items = [...(dialog?.querySelectorAll(focusableSelector) || [])];
         if (!items.length) return;
@@ -60,9 +60,9 @@ export function Modal({ open, onClose, title, children }) {
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-paper w-full sm:max-w-lg sm:rounded border border-line max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-line sticky top-0 bg-paper">
           <h2 id={titleId} className="font-display font-semibold text-[1.05rem]">{title}</h2>
-          <button onClick={onClose} className="text-ink-soft hover:text-ink" aria-label={`Cerrar ${title}`}>
+          {onClose ? <button onClick={onClose} className="text-ink-soft hover:text-ink" aria-label={`Cerrar ${title}`}>
             <X size={18} aria-hidden="true" />
-          </button>
+          </button> : null}
         </div>
         <div className="p-5">{children}</div>
       </div>

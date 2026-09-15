@@ -1,5 +1,5 @@
 import { migrateState } from "../migrations.js";
-import { LOCAL_STATE_KEY } from "../../repositories/localFinanceRepository.js";
+import { GUEST_STATE_KEY, LOCAL_STATE_KEY } from "../../repositories/localFinanceRepository.js";
 import { clearState, saveState } from "../storage.js";
 
 export function hasUserFinancialData(state) {
@@ -8,8 +8,13 @@ export function hasUserFinancialData(state) {
 
 export function inspectLocalMigration() {
   let raw;
+  let sourceKey = GUEST_STATE_KEY;
   try {
-    const serialized = globalThis.localStorage?.getItem(`copiloto-financiero:${LOCAL_STATE_KEY}`);
+    let serialized = globalThis.localStorage?.getItem(`copiloto-financiero:${GUEST_STATE_KEY}`);
+    if (serialized === null || serialized === undefined) {
+      sourceKey = LOCAL_STATE_KEY;
+      serialized = globalThis.localStorage?.getItem(`copiloto-financiero:${LOCAL_STATE_KEY}`);
+    }
     if (serialized === null || serialized === undefined) return { available: false, state: null, summary: null };
     raw = JSON.parse(serialized);
   } catch {
@@ -20,6 +25,7 @@ export function inspectLocalMigration() {
     const state = migrateState(raw);
     return {
       available: true,
+      sourceKey,
       state,
       summary: {
         accounts: state.accounts.length,
@@ -84,7 +90,7 @@ export function createLocalBackup(state, id) {
   return key;
 }
 
-export function removeMigratedLocalData(backupKey) {
-  clearState(LOCAL_STATE_KEY);
+export function removeMigratedLocalData(backupKey, sourceKey = GUEST_STATE_KEY) {
+  clearState(sourceKey);
   if (backupKey) clearState(backupKey);
 }
