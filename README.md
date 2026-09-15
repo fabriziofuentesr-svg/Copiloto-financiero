@@ -1,119 +1,77 @@
-# Copiloto Financiero — Bolivia
+# Copiloto Financiero
 
-Prototipo de copiloto financiero personal. React + Vite + Tailwind + React Router + Recharts.
+SPA React/Vite con reglas financieras puras, persistencia local compatible y persistencia PostgreSQL para usuarios autenticados mediante Supabase.
 
-## Ejecutar en local
+## Arquitectura
 
-```bash
-npm install
-npm run dev
+- `src/auth`: sesión, Google OAuth y redirecciones seguras.
+- `src/repositories`: contrato, adaptador local y adaptador Supabase.
+- `src/services/financial`: reglas puras; no consulta Supabase ni `localStorage`.
+- `src/services/import`: detección, resumen, huella e importación idempotente de datos locales.
+- `supabase/migrations`: esquema versionado, libro, funciones transaccionales y RLS.
+- `supabase/tests`: comprobaciones de aislamiento entre usuarios.
+
+Los usuarios autenticados usan PostgreSQL como fuente principal. `VITE_DATA_MODE=local` existe únicamente para desarrollo y compatibilidad. No se implementó edición offline; cuando no hay conexión, las escrituras deben reintentarse con la misma clave de operación.
+
+El esquema normalizado contiene `profiles`, `accounts`, `credit_cards`, `transactions`, `transaction_entries`, `goals`, `savings_contributions`, `debts`, `recurring_transactions`, `user_financial_settings`, `local_import_batches` y `applied_operations`. Las relaciones compuestas incluyen `user_id`, por lo que una referencia a cuenta, meta o tarjeta de otro usuario falla también si el cliente ha sido manipulado. Los saldos se derivan de `transaction_entries`; no existe una segunda columna de saldo editable en `accounts`.
+
+## Variables
+
+Copiar `.env.example` a `.env.local` y completar:
+
+- `VITE_SUPABASE_URL`: Project URL de Supabase. Puede llegar al navegador.
+- `VITE_SUPABASE_ANON_KEY`: clave pública/anon. Puede llegar al navegador porque RLS limita el acceso.
+- `VITE_APP_URL`: `http://localhost:5173` en desarrollo y el origen público en cada entorno.
+- `VITE_DATA_MODE`: `supabase` para autenticación; `local` solo para desarrollo sin proveedor.
+
+Este proyecto usa Vite, por eso las variables públicas llevan el prefijo `VITE_` en lugar de `NEXT_PUBLIC_`.
+
+Nunca colocar una `service_role` en una variable `VITE_*` ni en código cliente.
+
+## Configuración manual de Supabase y Google
+
+1. Crear un proyecto Supabase de desarrollo y elegir región.
+2. Instalar la CLI de Supabase, ejecutar `supabase start` y después `supabase db reset` para aplicar `supabase/migrations/202609150001_finance_auth_schema.sql` localmente.
+3. Ejecutar `supabase test db` para validar `supabase/tests/rls.sql` con usuarios aislados. Revisar el SQL antes de vincular cualquier proyecto remoto.
+4. En Google Cloud, configurar la pantalla de consentimiento OAuth.
+5. Crear credenciales Web OAuth 2.0.
+6. En Google, autorizar la URL callback que muestra Supabase para el proveedor Google.
+7. En Supabase Authentication > Providers, habilitar Google con el Client ID y Client Secret.
+8. En Supabase Authentication > URL Configuration, añadir `http://localhost:5173/auth/callback`, las URLs de preview autorizadas y la URL de producción.
+9. Configurar las tres variables públicas en Development, Preview y Production de Vercel.
+10. Revisar política de privacidad, retención, exportación y eliminación antes de producción.
+
+RLS está habilitado en todas las tablas financieras. Las políticas permiten `select`, `insert`, `update` y `delete` solo cuando `auth.uid() = user_id`; las claves foráneas compuestas refuerzan que las relaciones pertenezcan al mismo usuario. Los RPC usan `security invoker`, requieren una sesión autenticada y no dependen de una clave administrativa.
+
+## Desarrollo y pruebas
+
+```sh
+pnpm install
+pnpm test
+pnpm build
+pnpm dev
 ```
 
-## Desplegar en Vercel (vía GitHub)
+Para revisar la UI sin credenciales se puede usar `VITE_DATA_MODE=local`. Para probar OAuth, usar usuarios de prueba y un proyecto Supabase de desarrollo.
 
-```bash
-git init && git add . && git commit -m "Copiloto financiero: primera iteración modular"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/TU_REPO.git
-git push -u origin main
-```
+## Migración del navegador
 
-En https://vercel.com/new, importa el repo. Vercel detecta Vite automáticamente
-(Build: `npm run build`, Output: `dist`).
+Después del primer acceso, la app detecta `copiloto-financiero:estado-financiero-v1`, excluye datos de demostración, normaliza el esquema y muestra un resumen. La importación usa una huella SHA-256 y un identificador estable; la función PostgreSQL rechaza la mezcla automática si ya existen datos remotos. La copia local nunca se elimina automáticamente.
 
-## Usuario semilla
+Al terminar, la aplicación compara cantidades, relaciones y saldos redondeados a centavos. Una importación ya completada se reconoce por su huella y no se repite. Si la cuenta remota contiene otros datos, la interfaz bloquea la combinación automática y conserva ambos conjuntos para una conciliación futura.
 
-Los datos ficticios ("Nicolás") viven en `src/data/mockData.js` y se cargan la
-primera vez que abres la app. Desde ahí en adelante todo se persiste en
-`localStorage` del navegador (`src/services/storage.js`). Puedes reiniciar a
-los datos de ejemplo desde **Configuración → Reiniciar a datos de ejemplo**.
+## Saldo e integridad
 
-## Novedades de esta iteración: onboarding y perfil real
+El saldo remoto se deriva de `transaction_entries`. `apply_finance_state` ejecuta la cuenta y el movimiento inicial en una sola transacción, usa revisión optimista e idempotencia y reconcilia cuentas antiguas mediante un ajuste `migration_balance`. `initial_balance`, ajustes y transferencias siguen excluidos de los ingresos operativos por los servicios de dominio.
 
-- **Ya no se cargan datos ficticios al abrir la app.** Un usuario nuevo arranca
-  con `buildEmptyState()` (`src/data/mockData.js`): sin cuentas, sin
-  movimientos, sin deudas ni objetivos. Los datos de "Nicolás" siguen
-  existiendo como `buildDemoState()`, pero solo se cargan si el usuario lo
-  pide explícitamente desde **Configuración → Cargar datos de ejemplo**.
-- **Flujo de bienvenida** (`src/onboarding/`): Bienvenida → Configuración
-  inicial (nombre, moneda, situación laboral, ingreso mensual aproximado,
-  día de ingreso opcional) → Guía breve de 5 pasos (con progreso, Atrás,
-  Siguiente, Omitir y "Comenzar a usar la app"). Se muestra una sola vez,
-  controlada por `profile.onboardingCompleted` en el estado global.
-- El perfil se puede editar después desde **Configuración → Perfil**, y la
-  guía se puede volver a abrir desde **Configuración → Ayuda** (mismo
-  componente `GuideCarousel`, sin duplicar lógica).
-- **Inicio deja de ser un formulario.** Ya no tiene botones para registrar
-  ingresos/gastos/objetivos: solo quedan destacados "¿Puedo comprarlo?" y
-  "Preguntar al Copiloto", el resumen financiero (si ya hay datos) o un
-  estado vacío bien diseñado (si no), y una grilla "¿Qué puedes hacer?" con
-  las 5 secciones y un resumen en vivo de cada una.
-- El Copiloto y "¿Puedo permitírmelo?" ahora responden de forma explícita
-  cuando todavía no hay datos ("Registra tus ingresos y gastos...") en vez
-  de calcular una salud financiera falsa sobre un perfil vacío.
+## Limitaciones
 
-## Qué se implementó en la iteración anterior (Fases 1, 2 y la mayor parte de 3)
+- La eliminación irreversible de la cuenta está bloqueada hasta definir una política legal de retención.
+- La primera versión requiere conexión para guardar.
+- Los IDs históricos se conservan como identificadores de cliente para no romper relaciones durante la migración.
+- Las migraciones y pruebas RLS no se ejecutan contra un servicio remoto sin credenciales de desarrollo.
+- Antes del despliegue deben revisarse SQL, redirect URLs, RLS, backups y variables por entorno.
 
-- Navegación real de 5 secciones (Inicio, Movimientos, Planes, Análisis,
-  Copiloto) + secundarias (Cuentas, Configuración), sidebar en desktop y
-  bottom nav en móvil, totalmente responsive.
-- Modelo de datos separado: `Account`, `Transaction`, `Category`, `Debt`,
-  `Goal`, todo en `src/context/FinanceContext.jsx` con persistencia
-  automática.
-- Motor financiero en `src/services/financial/*` (sin JSX, funciones puras):
-  `calculateFinancialHealth()`, `calculateAvailableMoney()`, `projectBalance()`,
-  `generateInsights()`, `evaluatePurchase()`, `answerQuestion()` (Copiloto),
-  simuladores de metas y de pago adicional de deuda.
-- **Inicio**: salud financiera (score + 5 componentes), dinero realmente
-  disponible (saldo − comprometido), resumen mensual comparado con el mes
-  anterior, proyección a 30 días, próximos compromisos, insight principal,
-  accionesrápidas funcionales.
-- **Movimientos**: alta y baja de ingresos/gastos, filtro por categoría,
-  cuenta y texto, orden, actualiza cuentas y dashboard en tiempo real.
-- **Cuentas**: alta/baja, saldo total vs. deuda de tarjetas.
-- **Planes**: Objetivos (con simulador "¿qué pasa si ahorro X?"), Fondo de
-  emergencia (calculado sobre gastos esenciales reales), Deudas (con
-  simulador de pago adicional).
-- **Análisis**: gastos por categoría (gráfico), comparación mensual
-  (gráfico), tendencias por categoría, listado de insights.
-- **Copiloto**: interfaz de chat que responde con datos reales del usuario
-  (sin IA todavía, arquitectura lista para conectarla).
-- **¿Puedo permitírmelo?** y **Flujo de dinero**: herramientas standalone,
-  accesibles desde acciones rápidas del dashboard.
+## Procedimiento futuro de despliegue
 
-## Verificación realizada (sin `npm install`, sin red en este entorno)
-
-No pude ejecutar `npm run build` real porque este entorno de desarrollo no
-tiene acceso a red para instalar dependencias. En su lugar verifiqué, con
-esbuild: (1) que cada archivo `.js`/`.jsx` compila sin errores de sintaxis,
-y (2) que un bundle completo desde `main.jsx` resuelve correctamente todos
-los imports internos (encontré y corregí un import roto de `AlertBanner` en
-la iteración anterior). Aun así, **ejecuta `npm install && npm run build`
-apenas lo descargues** para confirmarlo en un entorno real antes de
-desplegar.
-
-## Qué falta / simplificaciones conocidas
-
-- **Editar** movimientos, cuentas, objetivos y deudas: hoy solo hay alta y
-  baja. Es lo primero que agregaría en la siguiente iteración.
-- El simulador de deuda usa interés simple mensual aproximado, no una tabla
-  de amortización completa capital/interés mes a mes.
-- Los compromisos recurrentes (alquiler, servicios, cuotas) no se concilian
-  todavía con las transacciones ya registradas ese mes — puede haber una
-  ligera duplicación conceptual entre "próximos compromisos" y "gastos ya
-  registrados". Se resuelve en la próxima fase de "presupuesto inteligente".
-- Sin integraciones bancarias reales, QR o notificaciones (tal como pediste
-  para este MVP).
-- Sin TypeScript todavía (decisión explicada en el análisis previo).
-
-## Próxima iteración sugerida (Fases 4-6 restantes)
-
-1. Edición completa de todas las entidades (movimientos, cuentas, deudas,
-   objetivos).
-2. Presupuesto inteligente sugerido a partir del historial.
-3. Alertas inteligentes como notificaciones persistentes (no solo insights
-   dentro de Análisis).
-4. Tabla de amortización real para el simulador de deudas.
-5. Conectar el Copiloto a un modelo de IA real (Claude API), manteniendo
-   `copilotEngine.js` como la capa que decide qué contexto financiero
-   pasarle al modelo.
+Este repositorio no ejecuta el despliegue. Cuando las verificaciones locales y legales estén aprobadas: aplicar primero la migración en un proyecto de desarrollo, ejecutar las pruebas RLS, probar Google OAuth con un usuario de prueba, aplicar la migración revisada al proyecto de producción, configurar las variables por entorno en Vercel y verificar las URLs de retorno antes de promover una compilación. Mantener una copia de seguridad de PostgreSQL y no retirar el almacenamiento local hasta validar importaciones reales.

@@ -8,6 +8,8 @@ import { SectionGuide } from "../components/SectionGuide.jsx";
 import { Link } from "react-router-dom";
 import { hasFinancialData } from "../services/financial/calculations.js";
 import { fmtBs } from "../services/financial/format.js";
+import { useAuth } from "../auth/AuthContext.jsx";
+import { createFinanceRepository } from "../repositories/factory.js";
 
 const EMPLOYMENT_LABELS = {
   dependiente: "Dependiente (sueldo fijo)",
@@ -19,8 +21,10 @@ const EMPLOYMENT_LABELS = {
 export default function Configuracion() {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
+  const auth = useAuth();
   const [editando, setEditando] = useState(false);
   const [guiaAbierta, setGuiaAbierta] = useState(false);
+  const [dataError, setDataError] = useState("");
 
   return (
     <div className="flex flex-col gap-5 max-w-md">
@@ -37,8 +41,7 @@ export default function Configuracion() {
                 const accepted = window.confirm(`Cambiarás la moneda principal de ${state.profile.currency} a ${data.currency} sin convertir los importes existentes. Los valores conservarán su número y quedará un registro del cambio. ¿Continuar?`);
                 if (!accepted) return;
                 const { currency, ...profileData } = data;
-                dispatch({ type: "UPDATE_PROFILE", payload: profileData });
-                dispatch({ type: "CHANGE_CURRENCY_WITHOUT_CONVERSION", payload: { currency } });
+                dispatch({ type: "UPDATE_PROFILE_AND_CURRENCY", payload: { profile: profileData, currency } });
               } else {
                 dispatch({ type: "UPDATE_PROFILE", payload: data });
               }
@@ -72,11 +75,25 @@ export default function Configuracion() {
 
       <Card title="Datos">
         <p className="text-sm text-ink-soft mb-3">
-          Tu perfil y tus datos financieros se guardan en este navegador. Puedes explorar la app con datos de
+          {auth.user ? "Tu perfil y tus datos financieros se guardan de forma segura en tu cuenta." : "Tu perfil y tus datos financieros se guardan en este navegador."} Puedes explorar la app con datos de
           demostración; tus datos actuales se conservan y podrás restaurarlos al terminar. También puedes borrar tus
           datos financieros y empezar de nuevo, sin perder tu perfil.
         </p>
         <div className="flex flex-col gap-2">
+          {dataError ? <p role="alert" className="rounded bg-brick/10 p-3 text-sm text-brick">{dataError}</p> : null}
+          {auth.user ? <Button variant="secondary" onClick={async () => {
+            setDataError("");
+            try {
+              const data = await createFinanceRepository(auth.user).exportData();
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url; link.download = `copiloto-financiero-${new Date().toISOString().slice(0, 10)}.json`; link.click();
+              URL.revokeObjectURL(url);
+            } catch (error) {
+              setDataError(error.userMessage || "No pudimos preparar la exportación. Intenta otra vez.");
+            }
+          }}>Exportar mis datos</Button> : null}
           <Button
             variant="secondary"
             onClick={() => {
@@ -107,6 +124,8 @@ export default function Configuracion() {
           </Button>
         </div>
       </Card>
+
+      {auth.user ? <Card title="Sesión"><p className="text-sm text-ink-soft mb-3">Sesión vinculada con {auth.user.email || "tu cuenta de Google"}.</p><Button variant="secondary" onClick={auth.signOut}>Cerrar sesión</Button><p className="mt-3 text-xs text-ink-soft">La eliminación completa de la cuenta requiere definir primero la política legal de retención. No se ejecuta desde esta pantalla.</p></Card> : null}
 
       <Modal open={guiaAbierta} onClose={() => setGuiaAbierta(false)} title="Guía rápida">
         <GuideCarousel onFinish={() => setGuiaAbierta(false)} onSkip={() => setGuiaAbierta(false)} />

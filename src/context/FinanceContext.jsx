@@ -1,13 +1,16 @@
-import React, { createContext, useContext, useEffect, useReducer } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { buildEmptyState, buildDemoState } from "../data/mockData.js";
-import { loadState, saveState } from "../services/storage.js";
 import { migrateState } from "../services/migrations.js";
-import { buildAccountCreation, getTransactionBalanceDelta } from "../services/financial/ledger.js";
+import { buildAccountCreation, buildTransfer, getTransactionBalanceDelta } from "../services/financial/ledger.js";
 import { localDateString } from "../services/financial/format.js";
+import { useAuth } from "../auth/AuthContext.jsx";
+import { createFinanceRepository } from "../repositories/factory.js";
+import { DATA_STATUS } from "../repositories/contracts.js";
+import { createLocalBackup, fingerprintState, inspectLocalMigration, migrationId, removeMigratedLocalData } from "../services/import/localMigration.js";
 
-const STORAGE_KEY = "estado-financiero-v1";
 const FinanceStateContext = createContext(null);
 const FinanceDispatchContext = createContext(null);
+const FinanceMetaContext = createContext(null);
 
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -63,6 +66,18 @@ export function financeReducer(state, action) {
     // financieros, ni el flag de onboarding salvo que se lo pase explícito).
     case "UPDATE_PROFILE":
       return { ...state, profile: { ...state.profile, ...action.payload } };
+
+    case "UPDATE_PROFILE_AND_CURRENCY":
+      return {
+        ...state,
+        profile: { ...state.profile, ...action.payload.profile, currency: action.payload.currency },
+        currencyHistory: [...(state.currencyHistory || []), {
+          from: state.profile.currency,
+          to: action.payload.currency,
+          strategy: "without_conversion",
+          changedAt: new Date().toISOString(),
+        }],
+      };
 
     case "CHANGE_CURRENCY_WITHOUT_CONVERSION":
       return {
@@ -121,6 +136,24 @@ export function financeReducer(state, action) {
         return { ...a, balance: money((Number(a.balance) || 0) + getTransactionBalanceDelta(tx)) };
       });
       return { ...state, transactions: [tx, ...(state.transactions || [])], accounts };
+    }
+
+    case "ADD_TRANSACTION_WITH_RECURRENCE": {
+      const transactionState = financeReducer(state, { type: "ADD_TRANSACTION", payload: action.payload.transaction });
+      if (transactionState === state) return state;
+      return financeReducer(transactionState, { type: "ADD_RECURRING_ITEM", payload: action.payload.recurrence });
+    }
+
+    case "TRANSFER_BETWEEN_ACCOUNTS": {
+      const transfer = buildTransfer(action.payload, state.accounts, uid, action.payload.createdAt || new Date());
+      if (!transfer) return state;
+      return {
+        ...state,
+        accounts: state.accounts.map((account) => account.id === transfer.source.id
+          ? { ...account, balance: money(account.balance - transfer.amount) }
+          : account.id === transfer.destination.id ? { ...account, balance: money(account.balance + transfer.amount) } : account),
+        transactions: [transfer.incoming, transfer.outgoing, ...state.transactions],
+      };
     }
 
     case "UPDATE_TRANSACTION": {
@@ -326,15 +359,129 @@ export function financeReducer(state, action) {
 }
 
 export function FinanceProvider({ children }) {
-  const [state, dispatch] = useReducer(financeReducer, null, () => migrateState(loadState(STORAGE_KEY)));
+  const auth = useAuth();
+  const [state, baseDispatch] = useReducer(financeReducer, null, buildEmptyState);
+  const stateRef = useRef(state);
+  const repositoryRef = useRef(null);
+  const repositoryGenerationRef = useRef(0);
+  const mutationQueueRef = useRef(Promise.resolve());
+  const savedTimerRef = useRef(null);
+  const [status, setStatus] = useState(DATA_STATUS.LOADING);
+  const [message, setMessage] = useState("");
+  const [migration, setMigration] = useState({ status: "idle", available: false, state: null, summary: null });
+  stateRef.current = state;
 
   useEffect(() => {
-    saveState(STORAGE_KEY, state);
-  }, [state]);
+    let active = true;
+    repositoryGenerationRef.current += 1;
+    const repository = createFinanceRepository(auth.user);
+    repositoryRef.current = repository;
+    if (!repository) {
+      const empty = buildEmptyState();
+      stateRef.current = empty;
+      baseDispatch({ type: "LOAD_STATE", payload: empty });
+      setMigration({ status: "idle", available: false, state: null, summary: null });
+      setStatus(DATA_STATUS.IDLE);
+      return undefined;
+    }
+    setStatus(DATA_STATUS.LOADING);
+    repository.load().then((loaded) => {
+      if (!active) return;
+      const normalized = migrateState(loaded);
+      stateRef.current = normalized;
+      baseDispatch({ type: "LOAD_STATE", payload: normalized });
+      setStatus(DATA_STATUS.IDLE);
+      if (repository.mode === "supabase") {
+        const local = inspectLocalMigration();
+        Promise.all([
+          repository.hasRemoteData(),
+          local.available && local.state ? fingerprintState(local.state).then((fingerprint) => repository.getImportStatus(fingerprint)) : null,
+        ]).then(([remoteExists, previousImport]) => {
+          if (!active) return;
+          const alreadyImported = previousImport?.status === "completed";
+          setMigration((current) => ({
+            ...current,
+            ...local,
+            remoteExists: remoteExists && !alreadyImported,
+            previousImport,
+            status: !local.available ? "idle" : alreadyImported ? "completed" : "pending",
+          }));
+        }).catch(() => {
+          if (active) setMigration((current) => ({ ...current, ...local, remoteExists: true, status: local.available ? "pending" : "idle", error: "No pudimos comparar los datos locales y remotos." }));
+        });
+      }
+    }).catch((error) => {
+      if (!active) return;
+      setMessage(error.userMessage || "No pudimos cargar tu información.");
+      setStatus(error.code === "session_expired" ? DATA_STATUS.SESSION_EXPIRED : DATA_STATUS.ERROR);
+    });
+    return () => {
+      active = false;
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, [auth.user?.id]);
+
+  const dispatch = useCallback((action) => {
+    const mutation = async () => {
+      const repository = repositoryRef.current;
+      if (!repository) return;
+      const repositoryGeneration = repositoryGenerationRef.current;
+      const previousState = stateRef.current;
+      const nextState = financeReducer(previousState, action);
+      if (nextState === previousState) return;
+      stateRef.current = nextState;
+      baseDispatch({ type: "LOAD_STATE", payload: nextState });
+      setStatus(DATA_STATUS.SAVING);
+      setMessage("");
+      try {
+        const saved = await repository.apply({ action, previousState, nextState });
+        if (repositoryGeneration !== repositoryGenerationRef.current) return;
+        const normalized = saved ? migrateState(saved) : nextState;
+        stateRef.current = normalized;
+        baseDispatch({ type: "LOAD_STATE", payload: normalized });
+        setStatus(DATA_STATUS.SAVED);
+        if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(() => setStatus((current) => current === DATA_STATUS.SAVED ? DATA_STATUS.IDLE : current), 1200);
+      } catch (error) {
+        if (repositoryGeneration !== repositoryGenerationRef.current) return;
+        stateRef.current = previousState;
+        baseDispatch({ type: "LOAD_STATE", payload: previousState });
+        setMessage(error.userMessage || "No pudimos guardar los cambios.");
+        setStatus(error.code === "session_expired" ? DATA_STATUS.SESSION_EXPIRED : DATA_STATUS.ERROR);
+      }
+    };
+    mutationQueueRef.current = mutationQueueRef.current.then(mutation, mutation);
+    return mutationQueueRef.current;
+  }, []);
+
+  const importLocal = useCallback(async () => {
+    const repository = repositoryRef.current;
+    if (!repository || !migration.state) return;
+    const repositoryGeneration = repositoryGenerationRef.current;
+    setMigration((current) => ({ ...current, status: "running", error: "" }));
+    try {
+      const fingerprint = await fingerprintState(migration.state);
+      const id = migrationId(fingerprint);
+      const backupKey = createLocalBackup(migration.state, id);
+      const result = await repository.importLocal(migration.state, id, fingerprint);
+      if (repositoryGeneration !== repositoryGenerationRef.current) return;
+      if (!result.verification?.ok) throw new Error("La importación remota terminó, pero la conciliación no coincide. Conservamos la copia local para revisarla.");
+      stateRef.current = result.state;
+      baseDispatch({ type: "LOAD_STATE", payload: result.state });
+      setMigration((current) => ({ ...current, status: "completed", result, backupKey }));
+    } catch (error) {
+      if (repositoryGeneration !== repositoryGenerationRef.current) return;
+      setMigration((current) => ({ ...current, status: "failed", error: error.userMessage || "No pudimos completar la importación." }));
+    }
+  }, [migration.state]);
+
+  const meta = useMemo(() => ({ status, message, migration, importLocal, dismissMigration: () => setMigration((current) => ({ ...current, status: "dismissed" })), removeLocalCopy: () => { removeMigratedLocalData(migration.backupKey); setMigration((current) => ({ ...current, status: "dismissed", available: false })); }, clearMessage: () => setMessage("") }), [status, message, migration, importLocal]);
 
   return (
     <FinanceStateContext.Provider value={state}>
-      <FinanceDispatchContext.Provider value={dispatch}>{children}</FinanceDispatchContext.Provider>
+      <FinanceDispatchContext.Provider value={dispatch}>
+        <FinanceMetaContext.Provider value={meta}>{children}</FinanceMetaContext.Provider>
+      </FinanceDispatchContext.Provider>
     </FinanceStateContext.Provider>
   );
 }
@@ -348,5 +495,11 @@ export function useFinanceState() {
 export function useFinanceDispatch() {
   const ctx = useContext(FinanceDispatchContext);
   if (!ctx) throw new Error("useFinanceDispatch debe usarse dentro de <FinanceProvider>");
+  return ctx;
+}
+
+export function useFinanceMeta() {
+  const ctx = useContext(FinanceMetaContext);
+  if (!ctx) throw new Error("useFinanceMeta debe usarse dentro de FinanceProvider");
   return ctx;
 }
