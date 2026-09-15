@@ -70,6 +70,24 @@ export function buildAccountCreation(payload, createId, createdAt = new Date()) 
   return { account, openingTransaction };
 }
 
+export function buildTransfer(payload, accounts, createId, createdAt = new Date()) {
+  const amount = Math.round((Number(payload.amount) || 0) * 100) / 100;
+  const source = accounts.find((account) => account.id === payload.fromAccountId && isAssetAccount(account));
+  const destination = accounts.find((account) => account.id === payload.toAccountId && isAssetAccount(account));
+  if (!(amount > 0) || !source || !destination || source.id === destination.id || Number(source.balance) < amount) return null;
+  const transferGroupId = payload.transferGroupId || createId("transfer");
+  const date = payload.date || localDateString(createdAt);
+  const description = String(payload.description || "").trim() || `Transferencia — ${source.name} a ${destination.name}`;
+  const common = { type: "transferencia", amount, date, category: "transferencia", origin: "internal_transfer", generated: true, transferGroupId };
+  return {
+    source,
+    destination,
+    amount,
+    outgoing: { id: createId("tx"), ...common, description, accountId: source.id, linkedAccountId: source.id, balanceDelta: -amount },
+    incoming: { id: createId("tx"), ...common, description, accountId: destination.id, linkedAccountId: destination.id, balanceDelta: amount },
+  };
+}
+
 export function getRealMovementProgress(state) {
   const real = (state.transactions || []).filter(isRealUserTransaction);
   const hasIncome = real.some((transaction) => transaction.type === "ingreso");

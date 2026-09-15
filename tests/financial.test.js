@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { buildEmptyState } from "../src/data/mockData.js";
-import { buildAccountCreation, getRealMovementProgress } from "../src/services/financial/ledger.js";
+import { buildAccountCreation, buildTransfer, getRealMovementProgress, isOperatingTransaction } from "../src/services/financial/ledger.js";
 import { migrateState, CURRENT_SCHEMA_VERSION } from "../src/services/migrations.js";
 import { fmtBs, fmtFecha, nextOccurrence, parseDate } from "../src/services/financial/format.js";
 import { calculateAvailableMoney, calculateFinancialHealth, getMonthlyComparison, getOperationalTransactions, getTotalBalance, getTotalDebtBalance, getTotalDebtInstallments, projectCashFlow, summarizePeriod } from "../src/services/financial/calculations.js";
@@ -62,6 +62,21 @@ test("crear una cuenta con saldo cero no crea movimiento", () => {
   const built = buildAccountCreation({ id: "asset", name: "Vacía", type: "efectivo", balance: 0 }, createId, referenceDate);
   assert.equal(built.account.balance, 0);
   assert.equal(built.openingTransaction, null);
+});
+
+test("una transferencia conserva el total, usa dos asientos y no es ingreso operativo", () => {
+  let sequence = 0;
+  const transfer = buildTransfer(
+    { fromAccountId: "cash", toAccountId: "savings", amount: 125.55 },
+    [{ id: "cash", name: "Efectivo", type: "efectivo", balance: 500 }, { id: "savings", name: "Ahorro", type: "ahorro", balance: 100 }],
+    (prefix) => `${prefix}-${++sequence}`,
+    referenceDate,
+  );
+  assert.equal(transfer.outgoing.balanceDelta, -125.55);
+  assert.equal(transfer.incoming.balanceDelta, 125.55);
+  assert.equal(transfer.outgoing.transferGroupId, transfer.incoming.transferGroupId);
+  assert.equal(isOperatingTransaction(transfer.outgoing), false);
+  assert.equal(500 + 100 + transfer.outgoing.balanceDelta + transfer.incoming.balanceDelta, 600);
 });
 
 test("una tarjeta con 500 utilizados no crea ingreso y sí afecta deuda y compromisos", () => {
