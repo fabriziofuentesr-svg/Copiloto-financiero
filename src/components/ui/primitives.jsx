@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 
 export function Card({ children, className = "", title, action }) {
@@ -25,21 +25,43 @@ export function Button({ children, variant = "primary", size = "md", className =
     danger: "bg-brick text-paper hover:bg-[#8E3325]",
   };
   return (
-    <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>
+    <button type={props.type || "button"} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>
       {children}
     </button>
   );
 }
 
 export function Modal({ open, onClose, title, children }) {
+  const dialogRef = useRef(null);
+  const titleId = useId();
+  useEffect(() => {
+    if (!open) return undefined;
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    const focusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+    dialog?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])")?.focus();
+    function onKeyDown(event) {
+      if (event.key === "Escape") onClose();
+      if (event.key === "Tab") {
+        const items = [...(dialog?.querySelectorAll(focusableSelector) || [])];
+        if (!items.length) return;
+        const first = items[0];
+        const last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("keydown", onKeyDown); previous?.focus?.(); };
+  }, [open, onClose]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/40 p-0 sm:p-4">
-      <div className="bg-paper w-full sm:max-w-lg sm:rounded border border-line max-h-[90vh] overflow-y-auto">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-paper w-full sm:max-w-lg sm:rounded border border-line max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-line sticky top-0 bg-paper">
-          <h2 className="font-display font-semibold text-[1.05rem]">{title}</h2>
-          <button onClick={onClose} className="text-ink-soft hover:text-ink" aria-label="Cerrar">
-            <X size={18} />
+          <h2 id={titleId} className="font-display font-semibold text-[1.05rem]">{title}</h2>
+          <button onClick={onClose} className="text-ink-soft hover:text-ink" aria-label={`Cerrar ${title}`}>
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
         <div className="p-5">{children}</div>
@@ -60,13 +82,13 @@ export function Field({ label, children }) {
 const inputClass =
   "font-sans text-sm px-3 py-2 border border-line rounded bg-paper-raised text-ink focus:outline-none focus:ring-2 focus:ring-teal";
 
-export function Input(props) {
-  return <input className={inputClass} {...props} />;
+export function Input({ className = "", ...props }) {
+  return <input className={`${inputClass} ${className}`} {...props} />;
 }
 
-export function Select({ children, ...props }) {
+export function Select({ children, className = "", ...props }) {
   return (
-    <select className={inputClass} {...props}>
+    <select className={`${inputClass} ${className}`} {...props}>
       {children}
     </select>
   );

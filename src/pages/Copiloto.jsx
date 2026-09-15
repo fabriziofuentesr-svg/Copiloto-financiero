@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Bot, User } from "lucide-react";
+import { Send, Bot, User, Lightbulb } from "lucide-react";
 import { useFinanceState } from "../context/FinanceContext.jsx";
 import { Card, Input, Button } from "../components/ui/primitives.jsx";
 import { answerQuestion } from "../services/financial/copilotEngine.js";
@@ -17,7 +17,7 @@ const SUGERENCIAS = [
 export default function Copiloto() {
   const state = useFinanceState();
   const [messages, setMessages] = useState([
-    { role: "bot", text: `Hola, ${state.profile.name}. Soy tu copiloto financiero. Preguntame lo que quieras sobre tu dinero.` },
+    { role: "bot", text: `Hola, ${state.profile.name}. Soy tu copiloto financiero. Pregúntame lo que quieras sobre tu dinero.` },
   ]);
   const [input, setInput] = useState("");
   const endRef = useRef(null);
@@ -52,15 +52,16 @@ export default function Copiloto() {
           <div ref={endRef} />
         </div>
 
-        {messages.length <= 1 && (
-          <div className="px-5 pb-3 flex flex-wrap gap-2">
+        <details className="px-5 pb-3" open={messages.length <= 1}>
+          <summary className="text-xs font-medium cursor-pointer flex items-center gap-1.5 mb-2"><Lightbulb size={13} aria-hidden="true" /> Sugerencias</summary>
+          <div className="flex flex-wrap gap-2">
             {SUGERENCIAS.map((s) => (
               <button key={s} onClick={() => enviar(s)} className="text-xs border border-line rounded px-2.5 py-1.5 hover:bg-paper-raised">
                 {s}
               </button>
             ))}
           </div>
-        )}
+        </details>
 
         <form
           onSubmit={(e) => {
@@ -69,17 +70,14 @@ export default function Copiloto() {
           }}
           className="flex gap-2 p-3 border-t border-line"
         >
-          <Input className="flex-1" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Preguntale algo a tu copiloto..." />
-          <Button type="submit" size="md">
-            <Send size={15} />
+          <Input aria-label="Pregunta para el Copiloto" className="flex-1" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Pregúntale algo a tu copiloto..." />
+          <Button type="submit" size="md" aria-label="Enviar pregunta al Copiloto">
+            <Send size={15} aria-hidden="true" />
           </Button>
         </form>
       </Card>
 
-      <p className="text-ink-soft text-xs">
-        Estas respuestas se generan con reglas sobre tus datos reales, todavía sin un modelo de IA conectado. La
-        arquitectura (services/financial/copilotEngine.js) está lista para enchufar un modelo real más adelante.
-      </p>
+      <p className="text-ink-soft text-xs">Las respuestas usan los datos que registraste. Revisa los supuestos y datos faltantes antes de tomar una decisión.</p>
       <SectionGuide section="copilot" />
     </div>
   );

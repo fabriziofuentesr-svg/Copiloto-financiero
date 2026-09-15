@@ -5,8 +5,8 @@ import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.j
 import { Card, Button, Modal, Field, Input, ProgressBar } from "../components/ui/primitives.jsx";
 import { GoalCard, DebtCard } from "../components/finance/cards.jsx";
 import { estimateGoalCompletion } from "../services/financial/goals.js";
-import { compareExtraPayment, totalMonthlyInstallments } from "../services/financial/debts.js";
-import { getEmergencyFundStatus } from "../services/financial/calculations.js";
+import { compareExtraPayment } from "../services/financial/debts.js";
+import { getEmergencyFundStatus, getTotalDebtInstallments } from "../services/financial/calculations.js";
 import { fmtBs, fmtPct } from "../services/financial/format.js";
 import { SectionGuide } from "../components/SectionGuide.jsx";
 
@@ -53,6 +53,7 @@ function Objetivos({ autoOpen }) {
   const unit = currencyLabel(currency);
   const [modalOpen, setModalOpen] = useState(autoOpen);
   const [form, setForm] = useState({ name: "", target: "", current: "", monthlyContribution: "" });
+  const [editingGoal, setEditingGoal] = useState(null);
   const [simGoal, setSimGoal] = useState(null);
   const [simAporte, setSimAporte] = useState("");
   const [aporteGoal, setAporteGoal] = useState(null);
@@ -65,8 +66,9 @@ function Objetivos({ autoOpen }) {
     const monthlyContribution = Number(form.monthlyContribution || 0);
     if (!form.name.trim() || !Number.isFinite(target) || target <= 0 || !Number.isFinite(current) || current < 0 || !Number.isFinite(monthlyContribution) || monthlyContribution < 0) return;
     dispatch({
-      type: "ADD_GOAL",
+      type: editingGoal ? "UPDATE_GOAL" : "ADD_GOAL",
       payload: {
+        ...(editingGoal ? { id: editingGoal.id } : {}),
         name: form.name.trim(),
         target,
         current: Math.min(target, current),
@@ -74,6 +76,7 @@ function Objetivos({ autoOpen }) {
       },
     });
     setForm({ name: "", target: "", current: "", monthlyContribution: "" });
+    setEditingGoal(null);
     setModalOpen(false);
   }
 
@@ -82,7 +85,7 @@ function Objetivos({ autoOpen }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => setModalOpen(true)}>
+        <Button size="sm" onClick={() => { setEditingGoal(null); setForm({ name: "", target: "", current: "", monthlyContribution: "" }); setModalOpen(true); }}>
           <Plus size={14} /> Nuevo objetivo
         </Button>
       </div>
@@ -92,7 +95,8 @@ function Objetivos({ autoOpen }) {
             key={g.id}
             goal={g}
             currency={currency}
-            onDelete={() => dispatch({ type: "DELETE_GOAL", payload: g.id })}
+            onDelete={() => { if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
+            onEdit={() => { setEditingGoal(g); setForm({ name: g.name, target: String(g.target), current: String(g.current), monthlyContribution: String(g.monthlyContribution || 0) }); setModalOpen(true); }}
             onAdd={() => {
               setAporteGoal(g);
               setAporteMonto("");
@@ -125,7 +129,7 @@ function Objetivos({ autoOpen }) {
         </div>
       </Modal>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nuevo objetivo">
+      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingGoal(null); }} title={editingGoal ? `Editar objetivo — ${editingGoal.name}` : "Nuevo objetivo"}>
         <form onSubmit={guardar} className="flex flex-col gap-3">
           <Field label="Nombre del objetivo">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej. Comprar un auto" required />
@@ -141,7 +145,7 @@ function Objetivos({ autoOpen }) {
           <Field label={`Aporte mensual (${unit})`}>
             <Input type="number" min="0" step="0.01" value={form.monthlyContribution} onChange={(e) => setForm({ ...form, monthlyContribution: e.target.value })} />
           </Field>
-          <Button type="submit" className="mt-2">Guardar</Button>
+          <Button type="submit" className="mt-2">{editingGoal ? "Guardar cambios" : "Guardar"}</Button>
         </form>
       </Modal>
 
@@ -245,15 +249,17 @@ function Deudas() {
   const dispatch = useFinanceDispatch();
   const currency = state.profile?.currency || "BOB";
   const unit = currencyLabel(currency);
-  const [form, setForm] = useState({ name: "", entity: "", principal: "", balance: "", rate: "", installment: "", paymentDay: "" });
+  const [form, setForm] = useState({ name: "", entity: "", principal: "", balance: "", rate: "", installment: "", paymentDay: "", linkedAccountId: "" });
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingDebt, setEditingDebt] = useState(null);
   const [simDebt, setSimDebt] = useState(null);
   const [extra, setExtra] = useState("");
   const [payDebt, setPayDebt] = useState(null);
   const [payAmount, setPayAmount] = useState("");
   const [payAccountId, setPayAccountId] = useState("");
 
-  const totalCuotas = totalMonthlyInstallments(state.debts);
+  const totalCuotas = getTotalDebtInstallments(state);
+  const creditCards = state.accounts.filter((account) => account.type === "tarjeta_credito" && Number(account.balance) < 0);
   const comparacion = simDebt && extra ? compareExtraPayment(simDebt, Number(extra)) : null;
 
   function guardar(e) {
@@ -261,10 +267,12 @@ function Deudas() {
     const balance = Number(form.balance);
     const installment = Number(form.installment);
     const rate = Number(form.rate || 0);
-    if (!form.name.trim() || !Number.isFinite(balance) || balance <= 0 || !Number.isFinite(installment) || installment <= 0 || !Number.isFinite(rate) || rate < 0) return;
+    const paymentDay = Number(form.paymentDay || 1);
+    if (!form.name.trim() || !Number.isFinite(balance) || balance <= 0 || !Number.isFinite(installment) || installment <= 0 || installment > balance || !Number.isFinite(rate) || rate < 0 || rate > 300 || paymentDay < 1 || paymentDay > 28) return;
     dispatch({
-      type: "ADD_DEBT",
+      type: editingDebt ? "UPDATE_DEBT" : "ADD_DEBT",
       payload: {
+        ...(editingDebt ? { id: editingDebt.id } : {}),
         name: form.name.trim(),
         entity: form.entity,
         type: "otro",
@@ -273,12 +281,14 @@ function Deudas() {
         rate,
         installment,
         frequency: "mensual",
-        paymentDay: Number(form.paymentDay || 1),
+        paymentDay,
         termMonths: null,
         remainingInstallments: null,
+        linkedAccountId: form.linkedAccountId || null,
       },
     });
-    setForm({ name: "", entity: "", principal: "", balance: "", rate: "", installment: "", paymentDay: "" });
+    setForm({ name: "", entity: "", principal: "", balance: "", rate: "", installment: "", paymentDay: "", linkedAccountId: "" });
+    setEditingDebt(null);
     setModalOpen(false);
   }
 
@@ -290,7 +300,7 @@ function Deudas() {
       </Card>
 
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => setModalOpen(true)}>
+        <Button size="sm" onClick={() => { setEditingDebt(null); setForm({ name: "", entity: "", principal: "", balance: "", rate: "", installment: "", paymentDay: "", linkedAccountId: "" }); setModalOpen(true); }}>
           <Plus size={14} /> Nueva deuda
         </Button>
       </div>
@@ -301,7 +311,8 @@ function Deudas() {
             key={d.id}
             debt={d}
             currency={currency}
-            onDelete={() => dispatch({ type: "DELETE_DEBT", payload: d.id })}
+            onDelete={() => { if (window.confirm(`Eliminar la deuda “${d.name}”? Esta acción quitará sus cuotas futuras del análisis.`)) dispatch({ type: "DELETE_DEBT", payload: d.id }); }}
+            onEdit={() => { setEditingDebt(d); setForm({ name: d.name, entity: d.entity || "", principal: String(d.principal || d.balance), balance: String(d.balance), rate: String(d.rate || 0), installment: String(d.installment), paymentDay: String(d.paymentDay || 1), linkedAccountId: d.linkedAccountId || "" }); setModalOpen(true); }}
             onPay={() => {
               setPayDebt(d);
               setPayAmount("");
@@ -313,12 +324,15 @@ function Deudas() {
             }}
           />
         ))}
+        {creditCards.map((card) => (
+          <Card key={card.id}>
+            <div className="flex justify-between gap-3"><div><p className="font-medium">{card.name}</p><p className="text-xs text-ink-soft">Tarjeta administrada desde Cuentas</p></div><span className="font-semibold">{fmtBs(Math.abs(card.balance), currency)}</span></div>
+            <div className="text-xs text-ink-soft mt-3">Pago mínimo: {card.minimumPayment ? fmtBs(card.minimumPayment, currency) : "falta completar"} · Día de pago: {card.paymentDay || "falta completar"}</div>
+          </Card>
+        ))}
       </div>
 
-      <p className="text-ink-soft text-xs">
-        El simulador usa una aproximación de interés simple mensual sobre el saldo. Una tabla de amortización
-        detallada (capital vs. interés mes a mes) queda planificada para la siguiente iteración.
-      </p>
+      <details className="text-ink-soft text-xs"><summary className="cursor-pointer font-medium">Cómo se estima el interés</summary><p className="mt-1">El simulador usa una aproximación mensual sobre el saldo; el resultado puede diferir del plan de pagos de tu entidad.</p></details>
 
       <Modal open={Boolean(payDebt)} onClose={() => setPayDebt(null)} title="Registrar pago">
         <div className="flex flex-col gap-3">
@@ -351,7 +365,7 @@ function Deudas() {
         </div>
       </Modal>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nueva deuda">
+      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingDebt(null); }} title={editingDebt ? `Editar deuda — ${editingDebt.name}` : "Nueva deuda"}>
         <form onSubmit={guardar} className="flex flex-col gap-3">
           <Field label="Nombre">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -359,12 +373,13 @@ function Deudas() {
           <Field label="Entidad">
             <Input value={form.entity} onChange={(e) => setForm({ ...form, entity: e.target.value })} />
           </Field>
+          {creditCards.length ? <Field label="Tarjeta vinculada (evita duplicar la deuda)"><select className="w-full rounded border border-line bg-paper-raised px-3 py-2 text-sm" value={form.linkedAccountId} onChange={(e) => setForm({ ...form, linkedAccountId: e.target.value })}><option value="">No corresponde a una tarjeta</option>{creditCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></Field> : null}
           <div className="grid grid-cols-2 gap-3">
             <Field label={`Saldo actual (${unit})`}>
               <Input type="number" min="0.01" step="0.01" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} required />
             </Field>
             <Field label="Tasa anual (%)">
-              <Input type="number" min="0" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
+              <Input type="number" min="0" max="300" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -375,7 +390,7 @@ function Deudas() {
               <Input type="number" min="1" max="28" value={form.paymentDay} onChange={(e) => setForm({ ...form, paymentDay: e.target.value })} />
             </Field>
           </div>
-          <Button type="submit" className="mt-2">Guardar</Button>
+          <Button type="submit" className="mt-2">{editingDebt ? "Guardar cambios" : "Guardar"}</Button>
         </form>
       </Modal>
 

@@ -13,7 +13,7 @@ function Item({ to, label, icon: Icon, end }) {
         }`
       }
     >
-      <Icon size={17} />
+      <Icon size={17} aria-hidden="true" />
       {label}
     </NavLink>
   );
@@ -26,7 +26,7 @@ export function Sidebar() {
         <div className="font-display font-semibold text-lg leading-tight">Copiloto</div>
         <div className="font-display font-semibold text-lg leading-tight text-teal">Financiero</div>
       </div>
-      <nav className="flex flex-col gap-1">
+      <nav aria-label="Navegación principal" className="flex flex-col gap-1">
         {MAIN_NAV.map((item) => (
           <Item key={item.to} {...item} />
         ))}
