@@ -17,22 +17,27 @@ function translate(error, fallback) {
 export function createSupabaseFinanceRepository(client, userId) {
   if (!client || !userId) throw new TypeError("El repositorio remoto necesita cliente y usuario.");
   let revision = 0;
+  let planningSupported = false;
   return {
     mode: "supabase",
     async load() {
       const { data, error } = await client.rpc("get_finance_state");
       if (error) throw translate(error, "No pudimos cargar tu información.");
       revision = Number(data?.revision) || 0;
+      planningSupported = Array.isArray(data?.state?.monthlyPlans) && Array.isArray(data?.state?.savingsAllocations);
       return migrateState(data?.state || buildEmptyState());
     },
     async apply({ action, nextState }) {
+      if (!planningSupported && (["SAVE_MONTHLY_PLAN","SAVE_CATEGORY","SAVINGS_OPERATION"].includes(action.type) || nextState.monthlyPlans?.length || nextState.savingsAllocations?.length || nextState.transactions?.some(tx=>tx.planItemId) || JSON.stringify(nextState.categories) !== JSON.stringify(buildEmptyState().categories))) throw new RepositoryError("migration_required", "La planificación todavía no está habilitada en tu cuenta. Tus cambios visibles se conservan; falta actualizar la base de datos.");
       const { data, error } = await client.rpc("apply_finance_state", {
         p_state: nextState,
         p_expected_revision: revision,
         p_operation_id: action.meta?.operationId || operationId(),
       });
       if (error) throw translate(error, "No pudimos guardar los cambios.");
+      if (planningSupported && (!Array.isArray(data?.state?.monthlyPlans) || !Array.isArray(data?.state?.savingsAllocations))) throw new RepositoryError("invalid_state", "No pudimos verificar el guardado completo. Conservamos tus cambios para reintentarlos.");
       revision = Number(data?.revision) || revision + 1;
+      if(nextState.accounts.some(account=>Math.round(account.balance*100) !== Math.round(data?.state?.accounts?.find(item=>item.id === account.id)?.balance*100))) throw new RepositoryError("reconciliation_failed","El saldo guardado no coincide con el libro esperado. Conservamos tus cambios para revisarlos y reintentarlos.");
       return migrateState(data?.state || nextState);
     },
     async hasRemoteData() {
@@ -47,6 +52,12 @@ export function createSupabaseFinanceRepository(client, userId) {
       return data || null;
     },
     async importLocal(localState, migrationId, fingerprint) {
+      if (!planningSupported) {
+        const loaded=await client.rpc("get_finance_state");
+        if(loaded.error) throw translate(loaded.error,"No pudimos verificar la importación.");
+        planningSupported=Array.isArray(loaded.data?.state?.monthlyPlans);
+        if(!planningSupported) throw new RepositoryError("migration_required","Falta actualizar la base de datos antes de importar tus categorías, planes y aportes. La copia local se conserva.");
+      }
       const { data, error } = await client.rpc("import_local_finance_state", {
         p_state: migrateState(localState), p_migration_id: migrationId, p_fingerprint: fingerprint,
       });

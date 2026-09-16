@@ -10,6 +10,7 @@ import { hasFinancialData } from "../services/financial/calculations.js";
 import { fmtBs } from "../services/financial/format.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { createFinanceRepository } from "../repositories/factory.js";
+import { CategoryManager } from "../components/finance/CategoryManager.jsx";
 
 const EMPLOYMENT_LABELS = {
   dependiente: "Dependiente (sueldo fijo)",
@@ -29,7 +30,7 @@ export default function Configuracion() {
   const [dataError, setDataError] = useState("");
 
   return (
-    <div className="flex flex-col gap-5 max-w-md">
+    <div className="flex flex-col gap-5">
       <h1 className="font-display text-2xl font-semibold">Configuración</h1>
 
       <Card title="Perfil" action={!editando && <Button size="sm" variant="secondary" onClick={() => setEditando(true)}>Editar</Button>}>
@@ -74,6 +75,7 @@ export default function Configuracion() {
           <HelpCircle size={14} /> Ver guía rápida
         </Button>
       </Card>
+      <Card title="Categorías de ingresos y gastos"><CategoryManager /></Card>
 
       <Card title="Datos">
         <p className="text-sm text-ink-soft mb-3">

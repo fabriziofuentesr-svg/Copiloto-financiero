@@ -16,6 +16,7 @@ export default function Cuentas() {
   const [notice, setNotice] = useState("");
 
   function deleteAccount(account) {
+    if(state.savingsAllocations.some(item=>item.accountId === account.id && item.amount>0)) { setNotice(`Libera primero los aportes protegidos en “${account.name}” desde Movimientos o Planes de Ahorro.`); return; }
     const linked = state.transactions.filter((transaction) => transaction.accountId === account.id);
     const userMovements = linked.filter((transaction) => !transaction.generated);
     if (userMovements.length) {

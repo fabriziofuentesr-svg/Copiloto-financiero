@@ -16,13 +16,13 @@ const STEPS = [
   },
   {
     icon: Target,
-    title: "Planes",
-    text: "Crea objetivos, planifica tu ahorro, administra tus deudas y organiza tus prioridades financieras.",
+    title: "Planes de Ahorro",
+    text: "Crea objetivos y separa dinero real con aportes protegidos o transferencias a cuentas de ahorro.",
   },
   {
     icon: BarChart3,
-    title: "Análisis",
-    text: "Consulta cómo está evolucionando tu situación financiera y descubre patrones en tus finanzas.",
+    title: "Mi mes",
+    text: "Prepara el Plan del mes, sigue tus límites y consulta la proyección, Salud financiera y comparaciones.",
   },
   {
     icon: Bot,

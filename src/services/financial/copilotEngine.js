@@ -3,6 +3,7 @@ import { startOfMonth } from "./format.js";
 import { evaluatePurchase } from "./purchaseAdvisor.js";
 import { estimateGoalCompletion } from "./goals.js";
 import { fmtBs, fmtPct } from "./format.js";
+import { monthlyPlanStatus } from "./monthlyPlan.js";
 
 export function parseLocalizedAmount(value) {
   const raw = String(value ?? "").replace(/\s/g, "");
@@ -38,6 +39,19 @@ export function answerQuestion(state, question, referenceDate = new Date()) {
   const health = calculateFinancialHealth(state, referenceDate);
   const current = summarizePeriod(state, startOfMonth(referenceDate), referenceDate);
   const requestedGoal = (state.goals || []).find((goal) => q.includes(String(goal.name || "").toLowerCase()));
+  const month=monthlyPlanStatus(state,undefined,referenceDate);
+  if(month.plan && includesAny(q,["imprevisto","emergencia"])) {
+    const safety=month.plan.emergency;
+    if(safety.status === "unknown") return "No informaste qué ahorros podrías usar ante un imprevisto. Puedes completarlo en Mi mes sin crear un fondo separado.";
+    return `Ahorros respaldados que podrías utilizar: ${fmtBs(health.reserve || 0,currency)}. ${safety.status === "none" ? "Informaste que no tienes ahorros disponibles." : safety.sourceType === "goal" ? "Usarlos reduciría el avance de ese plan; registra primero una liberación." : "El monto está limitado al saldo real de la cuenta."} Ese dinero ya forma parte de tus activos; no lo sumo nuevamente.`;
+  }
+  if(month.plan && includesAny(q,["dinero total","diferencia","ahorros acumulados"])) return `Dinero total en cuentas de activo: ${fmtBs(month.cash.total,currency)}. En cuentas de ahorro: ${fmtBs(month.cash.savings,currency)}; protegido en otras cuentas: ${fmtBs(month.cash.protectedMoney,currency)}; compromisos pendientes: ${fmtBs(month.fixedPending+month.debtPending+month.overduePending,currency)}. Disponible hoy: ${fmtBs(month.availableToday,currency)}. Los ahorros vinculados a un plan se excluyen una sola vez.`;
+  if (includesAny(q,["límite","limite","categoría","categoria"]) && month.plan) {
+    const item=month.expenses.find(item=>item.classification === "variable" && q.includes(item.categorySnapshot.name.toLowerCase())) || month.alerts[0];
+    if(!item) return "Entendí que preguntas por un límite variable. ¿Qué categoría de tu Plan del mes quieres revisar?";
+    return `${item.categorySnapshot.name}: gastaste ${fmtBs(item.actual,currency)} de ${fmtBs(item.estimated,currency)} estimados. ${item.alert === "superado" ? `Superaste el límite en ${fmtBs(item.difference,currency)}; revisa si faltan gastos y ajusta tu estimación en Mi mes.` : `Quedan ${fmtBs(item.remaining,currency)} dentro del límite.`}`;
+  }
+  if(includesAny(q,["cierre","terminar el mes","plan del mes"]) && month.plan) return `El disponible estimado al cierre es ${fmtBs(month.closing,currency)} frente a un objetivo de ${fmtBs(month.target,currency)}. Partí de ${fmtBs(month.cash.spendable,currency)}, sumé ingresos pendientes ${fmtBs(month.incomePending,currency)} y resté fijos, variables, cuotas, impagos y aportes pendientes ${fmtBs(month.fixedPending+month.variablePending+month.debtPending+month.overduePending+month.savingsPending,currency)}. Confianza ${month.confidence}. ${month.confidenceIssues.join("; ")}`;
 
   if (includesAny(q, ["puedo comprar", "puedo permitirme"]) || (q.includes("comprar") && /\d/.test(q))) {
     const purchaseAmount = extractAmount(q);
@@ -50,6 +64,11 @@ export function answerQuestion(state, question, referenceDate = new Date()) {
 
   if (q.includes("ahorrar") || q.includes("capacidad de ahorro")) {
     const requestedAmount = extractAmount(q);
+    if(month.plan) {
+      const capacity=Math.max(0,Math.min(month.availableToday,month.closing-month.target));
+      const amount=requestedAmount ?? capacity;
+      return `${amount <= capacity ? "Sí, de forma condicional" : "No con el plan actual"}. Un aporte de ${fmtBs(amount,currency)} dejaría ${fmtBs(month.availableToday-amount,currency)} disponibles hoy y ${fmtBs(month.closing-amount,currency)} estimados al cierre; tu objetivo es ${fmtBs(month.target,currency)}. Compromisos y cuotas pendientes: ${fmtBs(month.fixedPending+month.debtPending+month.overduePending,currency)}; variables previstos: ${fmtBs(month.variablePending,currency)}. Capacidad conservadora adicional: ${fmtBs(capacity,currency)}. Confianza ${month.confidence}.${month.confidenceIssues.length ? ` Falta revisar: ${month.confidenceIssues.join(", ")}.` : ""} El aporte debe asignarse a dinero real de una cuenta; la estimación no lo registra.`;
+    }
     if (!current.hasIncomeData || !current.hasExpenseData) return "Entendí que quieres evaluar tu ahorro. Necesito un ingreso real y un gasto real del mes para calcularlo con tus datos.";
     const capacity = Math.max(0, Math.min(current.balanceNeto, cash.available));
     if (requestedAmount !== null) {
@@ -71,8 +90,9 @@ export function answerQuestion(state, question, referenceDate = new Date()) {
 
   if (q.includes("salud")) {
     if (!health.available) return `La Salud financiera aún no está disponible. Falta completar: ${health.missing.join(", ")}.`;
-    const components = Object.entries(health.breakdown).map(([key, value]) => `${key}: ${value.score}%`).join(", ");
-    return `Tu Salud financiera es ${health.score}% con confianza ${health.confidence}. Componentes: ${components}. ${health.resumen}`;
+    const labels={flujoCaja:"Control del mes",reserva:"Dinero para imprevistos",endeudamiento:"Cuotas y compromisos",planificacion:"Objetivos y margen"};
+    const components = Object.entries(health.breakdown).map(([key, value]) => `${labels[key]}: ${value.score === null ? "no informado" : `${value.score}%`}`).join(", ");
+    return `${health.scoreDisplayable === false ? "Tu Salud financiera aún no tiene un puntaje global fiable" : `Tu Salud financiera es ${health.score}%`} con confianza ${health.confidence}. Componentes: ${components}. ${health.resumen}`;
   }
 
   if (includesAny(q, ["proyección", "proyeccion", "cómo estaré", "como estare", "30 días", "fin de mes"])) {
@@ -84,19 +104,19 @@ export function answerQuestion(state, question, referenceDate = new Date()) {
 
   if (q.includes("objetivo") || q.includes("meta") || requestedGoal) {
     const goal = requestedGoal || (state.goals || [])[0];
-    if (!goal) return "Entendí que preguntas por un objetivo. Crea uno en Planes e indica monto y aporte mensual.";
+    if (!goal) return "Entendí que preguntas por un objetivo. Crea uno en Planes de Ahorro e indica monto y aporte mensual.";
     const estimate = estimateGoalCompletion(goal);
-    if (estimate.months === null) return `“${goal.name}” no tiene un aporte mensual mayor a cero. Edítalo en Planes para calcular su fecha.`;
-    return `Con ${fmtBs(goal.monthlyContribution, currency)} al mes, alcanzarías “${goal.name}” en ${estimate.months} meses. Para acelerarlo, aumenta el aporte mensual en el simulador de Planes.`;
+    if (estimate.months === null) return `“${goal.name}” no tiene un aporte mensual mayor a cero. Edítalo en Planes de Ahorro para calcular su fecha.`;
+    return `Con ${fmtBs(goal.monthlyContribution, currency)} al mes, alcanzarías “${goal.name}” en ${estimate.months} meses. Para acelerarlo, aumenta el aporte mensual en el simulador de Planes de Ahorro.`;
   }
 
   if (q.includes("deuda") && includesAny(q, ["priorizar", "primero", "pagar"])) {
     const debts = [...(state.debts || []), ...(state.accounts || []).filter((account) => account.type === "tarjeta_credito" && Number(account.balance) < 0).map((account) => ({ name: account.name, balance: Math.abs(account.balance), rate: account.rate || 0 }))];
     const priority = debts.sort((a, b) => Number(b.rate) - Number(a.rate) || Number(b.balance) - Number(a.balance))[0];
-    return priority ? `Prioriza “${priority.name}”: es la obligación con mayor costo conocido o mayor saldo. Revisa su tasa y pago mínimo en Planes o Cuentas.` : "No encuentro deudas registradas. Si tienes una tarjeta con saldo utilizado, completa sus datos en Cuentas.";
+    return priority ? `Prioriza “${priority.name}”: es la obligación con mayor costo conocido o mayor saldo. Revisa su tasa y pago mínimo en Mi mes o Cuentas.` : "No encuentro deudas registradas. Si tienes una tarjeta con saldo utilizado, completa sus datos en Cuentas.";
   }
 
-  if (includesAny(q, ["disponible", "cuánto tengo", "cuanto tengo", "saldo real"])) return `Tienes ${fmtBs(cash.available, currency)} disponibles después de reservar ${fmtBs(cash.committed, currency)} para compromisos de los próximos 30 días.`;
+  if (includesAny(q, ["disponible", "cuánto tengo", "cuanto tengo", "saldo real"])) return `Tienes ${fmtBs(cash.available, currency)} disponibles después de reservar ${fmtBs(cash.committed, currency)} para compromisos pendientes.`;
 
   return "Entendí que buscas orientación financiera, pero necesito una consulta más concreta. Puedes preguntarme: “¿Cuánto tengo disponible?”, “¿Puedo ahorrar Bs 1.000?”, “Explícame mi Salud financiera” o “Proyección a fin de mes”.";
 }

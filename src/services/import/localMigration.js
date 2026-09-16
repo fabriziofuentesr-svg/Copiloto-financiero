@@ -42,6 +42,7 @@ export function inspectLocalMigration() {
 }
 
 function cents(value) { return Math.round((Number(value) || 0) * 100); }
+function canonical(value) { return JSON.stringify(value,(_,item)=>item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])) : item); }
 
 export function compareFinanceStates(localState, remoteState) {
   const local = migrateState(localState);
@@ -57,6 +58,10 @@ export function compareFinanceStates(localState, remoteState) {
     recurring: remote.recurringExpenses.length + remote.recurringIncomes.length === local.recurringExpenses.length + local.recurringIncomes.length,
     balances: balancesMatch,
     relations: relationsValid,
+    planning: canonical(local.monthlyPlans) === canonical(remote.monthlyPlans),
+    allocations: canonical(local.savingsAllocations) === canonical(remote.savingsAllocations),
+    categoryHistory: local.transactions.every(tx=>canonical(tx.categorySnapshot) === canonical(remote.transactions.find(item=>item.id === tx.id)?.categorySnapshot)),
+    savingsRelations: local.savingsContributions.every(event=>{const saved=remote.savingsContributions.find(item=>item.id === event.id);return saved && saved.method === event.method && saved.accountId === event.accountId;}),
   };
   return {
     ok: Object.values(checks).every(Boolean),

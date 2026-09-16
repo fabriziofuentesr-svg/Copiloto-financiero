@@ -1,4 +1,5 @@
 import { calculateAvailableMoney, getDataQuality, getEmergencyFundStatus, getTotalDebtBalance, projectCashFlow } from "./calculations.js";
+import { monthlyPlanStatus, monthlyHealth, monthKey } from "./monthlyPlan.js";
 
 function round(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -7,6 +8,21 @@ function round(value) {
 export function evaluatePurchase(state, amount, referenceDate = new Date()) {
   const price = round(amount);
   if (!(price > 0)) return { verdict: "incomplete", label: "Indica un monto válido", explanation: "Escribe un precio mayor a cero.", missing: ["precio de la compra"] };
+  const month=monthlyPlanStatus(state,monthKey(referenceDate),referenceDate);
+  if(month.plan) {
+    const health=monthlyHealth(state,month.month,referenceDate);
+    const reserveSource=state.accounts.find(account=>account.id === month.plan.emergency.sourceId);
+    const separatelyProtected=month.plan.emergency.sourceType === "goal" || reserveSource?.type === "ahorro";
+    const reserveAfter=separatelyProtected ? health.reserve : Math.max(0,health.reserve-price);
+    const reserveTarget=round(health.essentialMonthly*Math.max(1,state.emergencyFund?.monthsTarget || 3));
+    const projectedAfter=round(month.closing-price);
+    const missing=[...health.missing,...(!health.essentialMonthly ? ["gastos esenciales estimados"] : []),...(!month.plan.recordsComplete ? ["movimientos completos desde el inicio del mes"] : []),...(getDataQuality(state,referenceDate).level === "insuficiente" ? ["al menos un ingreso y un gasto reales"] : [])];
+    const common={price,availableBefore:month.availableToday,availableAfter:round(month.availableToday-price),totalAssetsBefore:month.cash.total,assetsAfter:round(month.cash.total-price),commitments:round(month.fixedPending+month.debtPending+month.overduePending),commitmentsCovered:month.availableToday>=price,reserveBefore:health.reserve,reserveAfter,reserveTarget,reserveMonthsAfter:health.essentialMonthly>0 ? reserveAfter/health.essentialMonthly : null,goalDelayed:projectedAfter<month.target ? "Objetivo de cierre del mes" : null,projectedAfter,debtBalance:getTotalDebtBalance(state),dataQuality:month.confidence,missing:[...new Set(missing)],assumptions:["Compra adicional no incluida en las estimaciones del Plan del mes","Cuentas de ahorro y aportes protegidos se excluyen una sola vez",`Reserva de referencia: ${state.emergencyFund?.monthsTarget || 3} meses de gastos esenciales`,separatelyProtected ? "La reserva está separada del disponible de uso diario" : "Por prudencia, la compra podría consumir el ahorro declarado en una cuenta de uso diario"]};
+    if(!common.commitmentsCovered || projectedAfter<0) return {...common,verdict:"no",label:"No recomendable",explanation:"La compra supera el disponible después de compromisos o deja el cierre del mes en negativo."};
+    if(missing.length) return {...common,verdict:"incomplete",label:"Evaluación incompleta",explanation:"Faltan datos para confirmar la cobertura del mes y los imprevistos."};
+    if(reserveAfter<reserveTarget || projectedAfter<month.target) return {...common,verdict:"precaucion",label:"Conviene esperar",explanation:"La reserva queda por debajo de su referencia o te alejas del objetivo de cierre. Revisa el Plan del mes antes de comprar."};
+    return {...common,verdict:"si",label:"Recomendable",explanation:"El plan conserva cobertura para compromisos, gastos variables, aportes y reserva; la compra deja cubierto el objetivo de cierre."};
+  }
 
   const cash = calculateAvailableMoney(state, referenceDate);
   const emergency = getEmergencyFundStatus(state, referenceDate);

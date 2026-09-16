@@ -9,12 +9,8 @@ import { compareExtraPayment } from "../services/financial/debts.js";
 import { getEmergencyFundStatus, getTotalDebtInstallments } from "../services/financial/calculations.js";
 import { fmtBs, fmtPct } from "../services/financial/format.js";
 import { SectionGuide } from "../components/SectionGuide.jsx";
-
-const TABS = [
-  { id: "objetivos", label: "Objetivos" },
-  { id: "emergencia", label: "Fondo de emergencia" },
-  { id: "deudas", label: "Deudas" },
-];
+import { SavingsOperationForm } from "../components/finance/SavingsOperationForm.jsx";
+import { Link, useNavigate } from "react-router-dom";
 
 function currencyLabel(currency) {
   return currency === "USD" ? "USD" : "Bs";
@@ -22,25 +18,14 @@ function currencyLabel(currency) {
 
 export default function Planes() {
   const [params] = useSearchParams();
-  const [tab, setTab] = useState(params.get("tab") || "objetivos");
+
 
   return (
     <div className="flex flex-col gap-5">
-      <h1 className="font-display text-2xl font-semibold">Planes</h1>
-      <div className="flex gap-1 border-b border-line">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 ${tab === t.id ? "border-ochre font-medium" : "border-transparent text-ink-soft"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {tab === "objetivos" && <Objetivos autoOpen={Boolean(params.get("nuevo"))} />}
-      {tab === "emergencia" && <FondoEmergencia />}
-      {tab === "deudas" && <Deudas />}
+      <h1 className="font-display text-2xl font-semibold">Planes de Ahorro</h1>
+      <p className="text-sm text-ink-soft">Objetivos de varios meses, con dinero asignado a cuentas y aportes trazables.</p>
+      <Objetivos autoOpen={Boolean(params.get("nuevo"))} />
+      <Link to="/mi-mes" className="text-sm underline">Consultar cuotas y compromisos en Mi mes</Link>
       <SectionGuide section="plans" />
     </div>
   );
@@ -57,12 +42,12 @@ function Objetivos({ autoOpen }) {
   const [simGoal, setSimGoal] = useState(null);
   const [simAporte, setSimAporte] = useState("");
   const [aporteGoal, setAporteGoal] = useState(null);
-  const [aporteMonto, setAporteMonto] = useState("");
+
 
   function guardar(e) {
     e.preventDefault();
     const target = Number(form.target);
-    const current = Number(form.current || 0);
+    const current = editingGoal?.current || 0;
     const monthlyContribution = Number(form.monthlyContribution || 0);
     if (!form.name.trim() || !Number.isFinite(target) || target <= 0 || !Number.isFinite(current) || current < 0 || !Number.isFinite(monthlyContribution) || monthlyContribution < 0) return;
     dispatch({
@@ -71,7 +56,7 @@ function Objetivos({ autoOpen }) {
         ...(editingGoal ? { id: editingGoal.id } : {}),
         name: form.name.trim(),
         target,
-        current: Math.min(target, current),
+        current,
         monthlyContribution,
       },
     });
@@ -95,11 +80,11 @@ function Objetivos({ autoOpen }) {
             key={g.id}
             goal={g}
             currency={currency}
-            onDelete={() => { if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
+            onDelete={() => { if (state.savingsAllocations.some(item=>item.goalId === g.id && item.amount > 0)) { window.alert("Libera primero los aportes vinculados a este plan."); return; } if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
             onEdit={() => { setEditingGoal(g); setForm({ name: g.name, target: String(g.target), current: String(g.current), monthlyContribution: String(g.monthlyContribution || 0) }); setModalOpen(true); }}
             onAdd={() => {
               setAporteGoal(g);
-              setAporteMonto("");
+
             }}
             onOpen={() => {
               setSimGoal(g);
@@ -111,22 +96,7 @@ function Objetivos({ autoOpen }) {
       </div>
 
       <Modal open={Boolean(aporteGoal)} onClose={() => setAporteGoal(null)} title="Registrar aporte">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-ink-soft">Añade un ahorro real a «{aporteGoal?.name || ""}».</p>
-          <Field label="Monto del aporte">
-            <Input type="number" min="0.01" step="0.01" value={aporteMonto} onChange={(e) => setAporteMonto(e.target.value)} />
-          </Field>
-          <Button
-            onClick={() => {
-              const amount = Number(aporteMonto);
-              if (!aporteGoal || !Number.isFinite(amount) || amount <= 0) return;
-              dispatch({ type: "ADD_TO_GOAL", payload: { id: aporteGoal.id, amount } });
-              setAporteGoal(null);
-            }}
-          >
-            Registrar aporte
-          </Button>
-        </div>
+        <SavingsOperationForm key={aporteGoal?.id} goalId={aporteGoal?.id} onSuccess={()=>setAporteGoal(null)} />
       </Modal>
 
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingGoal(null); }} title={editingGoal ? `Editar objetivo — ${editingGoal.name}` : "Nuevo objetivo"}>
@@ -139,9 +109,10 @@ function Objetivos({ autoOpen }) {
               <Input type="number" min="0.01" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} required />
             </Field>
             <Field label={`Ya tienes (${unit})`}>
-              <Input type="number" min="0" step="0.01" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} />
+              <Input type="number" value={editingGoal?.current || 0} disabled />
             </Field>
           </div>
+          <p className="text-xs text-ink-soft">El avance se actualiza al registrar aportes respaldados por cuentas. Los avances anteriores se conservan; no se consideran dinero protegido hasta vincular aportes.</p>
           <Field label={`Aporte mensual (${unit})`}>
             <Input type="number" min="0" step="0.01" value={form.monthlyContribution} onChange={(e) => setForm({ ...form, monthlyContribution: e.target.value })} />
           </Field>
@@ -178,13 +149,12 @@ function Objetivos({ autoOpen }) {
   );
 }
 
-function FondoEmergencia() {
+export function FondoEmergencia() {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
   const currency = state.profile?.currency || "BOB";
   const unit = currencyLabel(currency);
-  const { essentialMonthly, target, progresoPct, faltante, current, hasExpenses } = getEmergencyFundStatus(state);
-  const [aporte, setAporte] = useState("");
+  const { essentialMonthly, target, progresoPct, faltante, current, hasExpenses, known } = getEmergencyFundStatus(state);
 
   return (
     <Card>
@@ -196,14 +166,14 @@ function FondoEmergencia() {
 
       <div className="mt-4">
         <div className="flex justify-between text-sm mb-1">
-          <span>Ahorro actual: {fmtBs(current, currency)}</span>
-          <span className="text-ink-soft">{fmtPct(progresoPct)}</span>
+          <span>{known ? `Ahorro utilizable: ${fmtBs(current, currency)}` : "Ahorros para imprevistos: no informados"}</span>
+          {known ? <span className="text-ink-soft">{fmtPct(progresoPct)}</span> : null}
         </div>
-        <ProgressBar value={progresoPct * 100} color="#1F5C56" />
+        {known ? <ProgressBar value={progresoPct * 100} color="#1F5C56" /> : null}
       </div>
 
 
-      {!hasExpenses ? (
+      {!known ? <p className="text-sm mt-3 text-ink-soft">Indica en el Plan del mes si podrías utilizar ahorros ante un imprevisto. No necesitas crear un fondo separado.</p> : !hasExpenses ? (
         <p className="text-sm mt-3 text-ink-soft">Registra al menos un gasto esencial para calcular tu objetivo recomendado.</p>
       ) : (
         <p className="text-sm mt-3">
@@ -224,27 +194,13 @@ function FondoEmergencia() {
           </Button>
         ))}
       </div>
-      <div className="flex gap-2 items-end mt-4">
-        <Field label={`Añadir ahorro actual (${unit})`}>
-          <Input type="number" min="0.01" step="0.01" value={aporte} onChange={(e) => setAporte(e.target.value)} />
-        </Field>
-        <Button
-          size="sm"
-          onClick={() => {
-            const amount = Number(aporte);
-            if (!Number.isFinite(amount) || amount <= 0) return;
-            dispatch({ type: "ADD_TO_EMERGENCY_FUND", payload: { amount } });
-            setAporte("");
-          }}
-        >
-          Registrar ahorro
-        </Button>
-      </div>
+      <p className="text-xs text-ink-soft mt-4">El fondo anterior se conserva como referencia. En Mi mes indica la cuenta o el plan que respalda tus ahorros para imprevistos.</p><Link to="/mi-mes?config=health" className="text-sm underline mt-3 inline-block">Configurar ahorros para imprevistos</Link>
     </Card>
   );
 }
 
-function Deudas() {
+export function Deudas() {
+  const navigate=useNavigate();
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
   const currency = state.profile?.currency || "BOB";
@@ -254,9 +210,6 @@ function Deudas() {
   const [editingDebt, setEditingDebt] = useState(null);
   const [simDebt, setSimDebt] = useState(null);
   const [extra, setExtra] = useState("");
-  const [payDebt, setPayDebt] = useState(null);
-  const [payAmount, setPayAmount] = useState("");
-  const [payAccountId, setPayAccountId] = useState("");
 
   const totalCuotas = getTotalDebtInstallments(state);
   const creditCards = state.accounts.filter((account) => account.type === "tarjeta_credito" && Number(account.balance) < 0);
@@ -313,11 +266,7 @@ function Deudas() {
             currency={currency}
             onDelete={() => { if (window.confirm(`Eliminar la deuda “${d.name}”? Esta acción quitará sus cuotas futuras del análisis.`)) dispatch({ type: "DELETE_DEBT", payload: d.id }); }}
             onEdit={() => { setEditingDebt(d); setForm({ name: d.name, entity: d.entity || "", principal: String(d.principal || d.balance), balance: String(d.balance), rate: String(d.rate || 0), installment: String(d.installment), paymentDay: String(d.paymentDay || 1), linkedAccountId: d.linkedAccountId || "" }); setModalOpen(true); }}
-            onPay={() => {
-              setPayDebt(d);
-              setPayAmount("");
-              setPayAccountId(state.accounts.find((a) => a.type !== "tarjeta_credito")?.id || "");
-            }}
+            onPay={() => navigate(`/movimientos?nuevo=gasto&deuda=${d.id}&volver=/mi-mes`)}
             onSimulate={() => {
               setSimDebt(d);
               setExtra("");
@@ -327,43 +276,13 @@ function Deudas() {
         {creditCards.map((card) => (
           <Card key={card.id}>
             <div className="flex justify-between gap-3"><div><p className="font-medium">{card.name}</p><p className="text-xs text-ink-soft">Tarjeta administrada desde Cuentas</p></div><span className="font-semibold">{fmtBs(Math.abs(card.balance), currency)}</span></div>
+            <Button size="sm" variant="secondary" className="mt-3" onClick={()=>navigate(`/movimientos?nuevo=gasto&tarjeta=${card.id}&volver=/mi-mes`)}>Registrar pago de tarjeta</Button>
             <div className="text-xs text-ink-soft mt-3">Pago mínimo: {card.minimumPayment ? fmtBs(card.minimumPayment, currency) : "falta completar"} · Día de pago: {card.paymentDay || "falta completar"}</div>
           </Card>
         ))}
       </div>
 
       <details className="text-ink-soft text-xs"><summary className="cursor-pointer font-medium">Cómo se estima el interés</summary><p className="mt-1">El simulador usa una aproximación mensual sobre el saldo; el resultado puede diferir del plan de pagos de tu entidad.</p></details>
-
-      <Modal open={Boolean(payDebt)} onClose={() => setPayDebt(null)} title="Registrar pago">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-ink-soft">Registra un pago para reducir el saldo de «{payDebt?.name || ""}».</p>
-          <Field label="Cuenta desde la que pagas">
-            <select
-              className="w-full rounded border border-line bg-paper px-3 py-2 text-sm"
-              value={payAccountId}
-              onChange={(e) => setPayAccountId(e.target.value)}
-            >
-              <option value="">Selecciona una cuenta</option>
-              {state.accounts.filter((a) => a.type !== "tarjeta_credito").map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Monto del pago">
-            <Input type="number" min="0.01" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-          </Field>
-          <Button
-            onClick={() => {
-              const amount = Number(payAmount);
-              if (!payDebt || !payAccountId || !Number.isFinite(amount) || amount <= 0) return;
-              dispatch({ type: "PAY_DEBT", payload: { id: payDebt.id, amount, accountId: payAccountId } });
-              setPayDebt(null);
-            }}
-          >
-            Registrar pago
-          </Button>
-        </div>
-      </Modal>
 
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingDebt(null); }} title={editingDebt ? `Editar deuda — ${editingDebt.name}` : "Nueva deuda"}>
         <form onSubmit={guardar} className="flex flex-col gap-3">

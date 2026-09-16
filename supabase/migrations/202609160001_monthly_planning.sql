@@ -1,0 +1,69 @@
+-- Compatible extension of the authenticated ledger. No balances are copied.
+-- All writes remain one transaction, under the existing revision and operation key.
+create table public.finance_planning (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  categories jsonb,
+  monthly_plans jsonb not null default '[]' check (jsonb_typeof(monthly_plans) = 'array'),
+  savings_allocations jsonb not null default '[]' check (jsonb_typeof(savings_allocations) = 'array'),
+  transaction_metadata jsonb not null default '{}',
+  savings_metadata jsonb not null default '{}'
+  ,processed_requests jsonb not null default '[]' check (jsonb_typeof(processed_requests) = 'array')
+);
+alter table public.finance_planning enable row level security;
+create policy planning_owner on public.finance_planning for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+grant select,insert,update,delete on public.finance_planning to authenticated;
+revoke all on public.finance_planning from anon;
+
+alter function public.get_finance_state() rename to get_finance_state_v2;
+alter function public.apply_finance_state(jsonb,bigint,text) rename to apply_finance_state_v2;
+
+create function public.get_finance_state() returns jsonb language plpgsql security invoker set search_path=public as $$
+declare result jsonb; extra finance_planning; state jsonb;
+begin
+  if auth.uid() is null then raise exception 'authentication required' using errcode='28000'; end if;
+  result := get_finance_state_v2();
+  result := jsonb_set(result,'{state}',(result->'state') || jsonb_build_object('schemaVersion',3,'monthlyPlans','[]'::jsonb,'savingsAllocations','[]'::jsonb));
+  select * into extra from finance_planning where user_id=auth.uid();
+  if found then
+    state := result->'state';
+    state := state || jsonb_build_object('schemaVersion',3,'monthlyPlans',extra.monthly_plans,'savingsAllocations',extra.savings_allocations,'processedRequestIds',extra.processed_requests,
+      'transactions',coalesce((select jsonb_agg(value || coalesce(extra.transaction_metadata->(value->>'id'),'{}')) from jsonb_array_elements(state->'transactions')),'[]'),
+      'savingsContributions',coalesce((select jsonb_agg(value || coalesce(extra.savings_metadata->(value->>'id'),'{}')) from jsonb_array_elements(state->'savingsContributions')),'[]'));
+    if extra.categories is not null then state := state || jsonb_build_object('categories',extra.categories); end if;
+    result := result || jsonb_build_object('state',state);
+  end if;
+  return result;
+end $$;
+
+create function public.apply_finance_state(p_state jsonb,p_expected_revision bigint,p_operation_id text) returns jsonb language plpgsql security invoker set search_path=public as $$
+declare final_result jsonb; u uuid := auth.uid(); allocation jsonb; category jsonb; previous finance_planning;
+begin
+  if u is null then raise exception 'authentication required' using errcode='28000'; end if;
+  select a.result into final_result from applied_operations a where user_id=u and operation_id=p_operation_id;
+  if found then return final_result; end if;
+  select * into previous from finance_planning where user_id=u;
+  final_result := apply_finance_state_v2(p_state,p_expected_revision,p_operation_id);
+  for allocation in select value from jsonb_array_elements(coalesce(p_state->'savingsAllocations',previous.savings_allocations,'[]')) loop
+    if coalesce((allocation->>'amount')::numeric,-1) < 0 or not exists(select 1 from accounts where user_id=u and id=allocation->>'accountId' and deleted_at is null)
+       or not exists(select 1 from goals where user_id=u and id=allocation->>'goalId' and deleted_at is null) then
+      raise exception 'invalid savings allocation' using errcode='23514';
+    end if;
+  end loop;
+  for category in select value from jsonb_array_elements(coalesce(p_state->'categories','[]')) loop
+    if coalesce(category->>'type','') not in ('ingreso','gasto') or (category->>'type'='gasto' and coalesce(category->>'classification','') not in ('fijo','variable')) then
+      raise exception 'invalid category classification' using errcode='23514';
+    end if;
+  end loop;
+  insert into finance_planning(user_id,categories,monthly_plans,savings_allocations,transaction_metadata,savings_metadata,processed_requests)
+  values(u,p_state->'categories',coalesce(p_state->'monthlyPlans',previous.monthly_plans,'[]'),coalesce(p_state->'savingsAllocations',previous.savings_allocations,'[]'),
+    coalesce((select jsonb_object_agg(value->>'id',coalesce(previous.transaction_metadata->(value->>'id'),'{}') || (value - array['amount','balanceDelta','accountId','category','date','type','description','origin','generated','linkedDebtId','transferGroupId','recurringId','paymentMethod'])) from jsonb_array_elements(coalesce(p_state->'transactions','[]'))),'{}'),
+    coalesce((select jsonb_object_agg(value->>'id',coalesce(previous.savings_metadata->(value->>'id'),'{}') || (value - array['amount','date','kind','origin','linkedGoalId'])) from jsonb_array_elements(coalesce(p_state->'savingsContributions','[]'))),'{}'),coalesce(p_state->'processedRequestIds',previous.processed_requests,'[]'))
+  on conflict(user_id) do update set categories=coalesce(excluded.categories,finance_planning.categories),monthly_plans=excluded.monthly_plans,savings_allocations=excluded.savings_allocations,transaction_metadata=excluded.transaction_metadata,savings_metadata=excluded.savings_metadata,processed_requests=excluded.processed_requests;
+  final_result := get_finance_state();
+  update applied_operations set result=final_result where user_id=u and operation_id=p_operation_id;
+  return final_result;
+end $$;
+revoke all on function public.get_finance_state() from public,anon;
+revoke all on function public.apply_finance_state(jsonb,bigint,text) from public,anon;
+grant execute on function public.get_finance_state() to authenticated;
+grant execute on function public.apply_finance_state(jsonb,bigint,text) to authenticated;

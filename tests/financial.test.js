@@ -187,7 +187,7 @@ test("Cuentas está en la navegación visible y enlazada desde Inicio", async ()
 });
 
 test("cuentas, movimientos, objetivos y deudas tienen operaciones de edición trazables", async () => {
-  const reducer = await readFile(new URL("../src/context/FinanceContext.jsx", import.meta.url), "utf8");
+  const reducer = await readFile(new URL("../src/services/financeReducer.js", import.meta.url), "utf8");
   for (const action of ["UPDATE_ACCOUNT_METADATA", "ADJUST_ACCOUNT_BALANCE", "UPDATE_TRANSACTION", "UPDATE_GOAL", "UPDATE_DEBT"]) assert.match(reducer, new RegExp(action));
   assert.match(reducer, /balance_adjustment/);
 });

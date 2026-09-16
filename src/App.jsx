@@ -47,8 +47,10 @@ function ProtectedApplication() {
         <Route path="/" element={<Inicio />} />
         <Route path="/movimientos" element={<Movimientos />} />
         <Route path="/cuentas" element={<Cuentas />} />
-        <Route path="/planes" element={<Planes />} />
-        <Route path="/analisis" element={<Analisis />} />
+        <Route path="/planes-ahorro" element={<Planes />} />
+        <Route path="/mi-mes" element={<Analisis />} />
+        <Route path="/planes" element={<LegacyRedirect to="/planes-ahorro" />} />
+        <Route path="/analisis" element={<LegacyRedirect to="/mi-mes" />} />
         <Route path="/copiloto" element={<Copiloto />} />
         <Route path="/puedo-comprarlo" element={<PuedoComprarlo />} />
         <Route path="/flujo-de-dinero" element={<FlujoDeDinero />} />
@@ -61,3 +63,5 @@ function ProtectedApplication() {
     <LocalMigrationPrompt />
   </>);
 }
+
+function LegacyRedirect({to}) { const location=useLocation(); return <Navigate to={`${to}${location.search}`} replace />; }

@@ -41,6 +41,7 @@ export function Modal({ open, onClose, title, children }) {
     const focusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
     dialog?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])")?.focus();
     function onKeyDown(event) {
+      if ([...document.querySelectorAll('[role="dialog"]')].at(-1) !== dialog) return;
       if (event.key === "Escape" && onClose) onClose();
       if (event.key === "Tab") {
         const items = [...(dialog?.querySelectorAll(focusableSelector) || [])];

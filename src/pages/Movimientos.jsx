@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { SavingsOperationForm, TransferForm } from "../components/finance/SavingsOperationForm.jsx";
 import { CalendarClock, Pencil, Plus, Trash2 } from "lucide-react";
 import { useFinanceDispatch, useFinanceState } from "../context/FinanceContext.jsx";
 import { TransactionItem } from "../components/finance/cards.jsx";
@@ -12,16 +13,25 @@ export default function Movimientos() {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const [operation,setOperation] = useState(params.get("operacion") === "ahorro" ? "saving" : null);
+  const [usePrefill,setUsePrefill] = useState(Boolean(params.get("nuevo")));
+  const planItem=state.monthlyPlans?.find(plan=>plan.month === params.get("planMonth"))?.expenses.find(item=>item.id === params.get("planItemId"));
+  const linkedCard=state.accounts.some(account=>account.id === planItem?.linkedObligationId);
+  const debt=state.debts.find(item=>item.id === params.get("deuda"));
+  const card=state.accounts.find(item=>item.id === params.get("tarjeta") && item.type === "tarjeta_credito");
+  const prefill=planItem ? {description:planItem.name,amount:String(planItem.estimated),category:planItem.categoryId,planMonth:params.get("planMonth"),planItemId:planItem.id,completesCommitment:true,...(planItem.linkedObligationId ? {[linkedCard ? "linkedCreditCardId" : "linkedDebtId"]:planItem.linkedObligationId} : {})} : debt ? {description:`Pago de ${debt.name}`,amount:String(debt.installment),category:"deudas",linkedDebtId:debt.id} : card ? {description:`Pago de ${card.name}`,amount:String(card.minimumPayment || ""),category:"deudas",linkedCreditCardId:card.id} : {};
   const [modalOpen, setModalOpen] = useState(Boolean(params.get("nuevo")));
   const [movementType, setMovementType] = useState(params.get("nuevo") === "ingreso" ? "ingreso" : "gasto");
   const [editing, setEditing] = useState(null);
   const [recurringOpen, setRecurringOpen] = useState(false);
-  const [filtroCategoria, setFiltroCategoria] = useState("todas");
+  const [filtroCategoria, setFiltroCategoria] = useState(params.get("categoria") || "todas");
   const [filtroCuenta, setFiltroCuenta] = useState("todas");
   const [busqueda, setBusqueda] = useState("");
   const [orden, setOrden] = useState("reciente");
 
-  function abrirNuevo(tipo) { setMovementType(tipo); setModalOpen(true); }
+  function abrirNuevo(tipo) { setUsePrefill(false); setMovementType(tipo); setModalOpen(true); }
+  function saved() { setModalOpen(false); if(params.get("volver") === "/mi-mes") navigate("/mi-mes"); }
   const movimientosFiltrados = useMemo(() => {
     let list = [...state.transactions];
     if (filtroCategoria !== "todas") list = list.filter((transaction) => transaction.category === filtroCategoria);
@@ -33,14 +43,17 @@ export default function Movimientos() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between flex-wrap gap-3"><h1 className="font-display text-2xl font-semibold">Movimientos</h1><div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={() => setRecurringOpen(true)}><CalendarClock size={14} /> Recurrentes</Button><Button size="sm" variant="secondary" onClick={() => abrirNuevo("ingreso")}><Plus size={14} /> Ingreso</Button><Button size="sm" onClick={() => abrirNuevo("gasto")}><Plus size={14} /> Gasto</Button></div></div>
+      <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={()=>setOperation("saving")}>Aporte o liberación de ahorro</Button><Button size="sm" variant="secondary" onClick={()=>setOperation("transfer")}>Transferencia entre cuentas</Button></div>
       <Card><div className="grid sm:grid-cols-4 gap-3">
         <Field label="Buscar"><Input value={busqueda} onChange={(event) => setBusqueda(event.target.value)} placeholder="Descripción..." /></Field>
         <Field label="Categoría"><Select value={filtroCategoria} onChange={(event) => setFiltroCategoria(event.target.value)}><option value="todas">Todas</option>{state.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</Select></Field>
         <Field label="Cuenta"><Select value={filtroCuenta} onChange={(event) => setFiltroCuenta(event.target.value)}><option value="todas">Todas</option>{state.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</Select></Field>
         <Field label="Ordenar por"><Select value={orden} onChange={(event) => setOrden(event.target.value)}><option value="reciente">Más reciente</option><option value="antiguo">Más antiguo</option><option value="mayor">Mayor monto</option><option value="menor">Menor monto</option></Select></Field>
       </div></Card>
-      <Card>{movimientosFiltrados.length === 0 ? <p className="text-ink-soft text-sm">No hay movimientos que coincidan. Registra uno o cambia los filtros.</p> : movimientosFiltrados.map((transaction) => <TransactionItem key={transaction.id} tx={transaction} categoryName={state.categories.find((category) => category.id === transaction.category)?.name || (transaction.type === "ajuste" ? "Ajuste de saldo" : transaction.category)} accountName={state.accounts.find((account) => account.id === transaction.accountId)?.name || "Cuenta eliminada"} currency={state.profile.currency} onEdit={!transaction.generated ? () => setEditing(transaction) : null} onDelete={!transaction.generated ? () => { if (window.confirm(`¿Eliminar “${transaction.description}”? El saldo de la cuenta se actualizará.`)) dispatch({ type: "DELETE_TRANSACTION", payload: transaction.id }); } : null} />)}</Card>
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={movementType === "ingreso" ? "Nuevo ingreso" : "Nuevo gasto"}><TransactionForm key={movementType} initialType={movementType} onSuccess={() => setModalOpen(false)} /></Modal>
+      <Card>{movimientosFiltrados.length === 0 ? <p className="text-ink-soft text-sm">No hay movimientos que coincidan. Registra uno o cambia los filtros.</p> : movimientosFiltrados.map((transaction) => <TransactionItem key={transaction.id} tx={transaction} categoryName={transaction.categorySnapshot?.name || state.categories.find((category) => category.id === transaction.category)?.name || (transaction.type === "ajuste" ? "Ajuste de saldo" : transaction.type === "transferencia" ? "Transferencia interna" : transaction.category)} accountName={state.accounts.find((account) => account.id === transaction.accountId)?.name || "Cuenta eliminada"} currency={state.profile.currency} onEdit={!transaction.generated ? () => setEditing(transaction) : null} onDelete={!transaction.generated ? () => { if (window.confirm(`¿Eliminar “${transaction.description}”? El saldo de la cuenta se actualizará.`)) dispatch({ type: "DELETE_TRANSACTION", payload: transaction.id }); } : null} />)}</Card>
+      <Card title="Historial de ahorro">{state.savingsContributions?.length ? state.savingsContributions.map(item=><p className="text-sm py-2" key={item.id}>{item.date} · {item.goalName || "Fondo de emergencia"} · {item.method === "release" ? "Liberado" : item.method === "reconcile" ? "Avance anterior vinculado" : "Aportado"} {fmtBs(item.amount,state.profile.currency)}</p>) : <p className="text-sm text-ink-soft">Los aportes respaldados por cuentas aparecerán aquí.</p>}</Card>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={movementType === "ingreso" ? "Nuevo ingreso" : "Nuevo gasto"}><TransactionForm key={movementType} initialType={movementType} prefill={usePrefill ? prefill : {}} lockType={usePrefill && Boolean(planItem || debt || card)} onSuccess={saved} /></Modal>
+      <Modal open={Boolean(operation)} onClose={()=>setOperation(null)} title={operation === "saving" ? "Ahorro respaldado por cuentas" : "Transferencia"}>{operation === "saving" ? <SavingsOperationForm initialAmount={params.get("monto") || ""} onSuccess={()=>setOperation(null)} /> : <TransferForm onSuccess={()=>setOperation(null)} />}</Modal>
       <Modal open={Boolean(editing)} onClose={() => setEditing(null)} title={`Editar ${editing?.description || "movimiento"}`}><TransactionForm key={editing?.id} transaction={editing} onSuccess={() => setEditing(null)} /></Modal>
       <Modal open={recurringOpen} onClose={() => setRecurringOpen(false)} title="Ingresos y gastos recurrentes"><RecurringManager /></Modal>
       <SectionGuide section="movements" />
@@ -54,7 +67,7 @@ function RecurringManager() {
   const [form, setForm] = useState({ kind: "gasto", name: "", amount: "", dayOfMonth: "1", category: "" });
   const [editingRecurring, setEditingRecurring] = useState(null);
   const items = [...(state.recurringIncomes || []).map((item) => ({ ...item, kind: "ingreso" })), ...(state.recurringExpenses || []).map((item) => ({ ...item, kind: "gasto" }))];
-  const categories = state.categories.filter((category) => category.type === form.kind && !category.system);
+  const categories = state.categories.filter((category) => category.type === form.kind && !category.system && (!category.archived || category.id === form.category));
 
   function save(event) {
     event.preventDefault();

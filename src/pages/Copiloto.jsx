@@ -12,6 +12,9 @@ const SUGERENCIAS = [
   "¿Cómo puedo llegar antes a mi objetivo?",
   "¿Qué deuda debería priorizar?",
   "¿Cuánto dinero realmente tengo disponible?",
+  "¿Cómo terminaría el mes frente a mi objetivo de cierre?",
+  "¿Qué categoría está cerca del límite?",
+  "¿Puedo ahorrar Bs 1.000 este mes?",
 ];
 
 export default function Copiloto() {

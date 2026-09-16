@@ -1,21 +1,25 @@
 import { buildEmptyState, CATEGORIES } from "../data/mockData.js";
+import { normalizeCategory } from "./categories.js";
+import { categorySnapshot } from "./financial/monthlyPlan.js";
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 function mergeCategories(saved = []) {
   const byId = new Map(CATEGORIES.map((category) => [category.id, category]));
   saved.forEach((category) => byId.set(category.id, { ...byId.get(category.id), ...category }));
-  return [...byId.values()];
+  return [...byId.values()].map(normalizeCategory);
 }
 
 export function migrateState(savedState) {
   const empty = buildEmptyState();
   if (!savedState) return empty;
+  const categories = mergeCategories(savedState.categories);
   const transactions = (savedState.transactions || []).map((transaction) => ({
     origin: "user",
     generated: false,
     linkedAccountId: transaction.accountId || null,
     recurringId: null,
+    categorySnapshot: categorySnapshot(categories.find(category=>category.id === transaction.category)),
     ...transaction,
   }));
   const accounts = (savedState.accounts || []).map((account) => ({
@@ -40,7 +44,9 @@ export function migrateState(savedState) {
     profile: { ...empty.profile, ...(savedState.profile || {}) },
     accounts,
     transactions,
-    categories: mergeCategories(savedState.categories),
+    categories,
+    monthlyPlans: savedState.monthlyPlans || [],
+    savingsAllocations: savedState.savingsAllocations || [],
     recurringExpenses,
     debts,
     recurringIncomes: (savedState.recurringIncomes || []).map((item) => ({ frequency: "mensual", active: true, ...item })),

@@ -8,32 +8,40 @@ function buildInitialForm(state, type, transaction) {
     description: transaction.description || "", amount: String(transaction.amount || ""), date: localDateString(transaction.date),
     category: transaction.category || "", accountId: transaction.accountId || "", paymentMethod: transaction.paymentMethod || "", type: transaction.type,
   };
-  return { description: "", amount: "", date: localDateString(), category: state.categories.find((category) => category.type === type && !category.system)?.id || "", accountId: state.accounts[0]?.id || "", paymentMethod: state.paymentMethods[0]?.id || "", type };
+  return { description: "", amount: "", date: localDateString(), category: state.categories.find((category) => category.type === type && !category.system && !category.archived)?.id || "", accountId: state.accounts.find(account=>account.type !== "tarjeta_credito")?.id || state.accounts[0]?.id || "", paymentMethod: state.paymentMethods[0]?.id || "", type };
 }
 
-export function TransactionForm({ initialType = "gasto", lockType = false, transaction = null, onSuccess, submitLabel }) {
+export function TransactionForm({ initialType = "gasto", lockType = false, transaction = null, prefill = {}, onSuccess, submitLabel }) {
   const state = useFinanceState();
   const dispatch = useFinanceDispatch();
-  const [form, setForm] = useState(() => buildInitialForm(state, initialType, transaction));
+  const [form, setForm] = useState(() => ({ ...buildInitialForm(state, initialType, transaction), ...(transaction ? { planMonth:transaction.planMonth, planItemId:transaction.planItemId, completesCommitment:transaction.completesCommitment, linkedDebtId:transaction.linkedDebtId, linkedCreditCardId:transaction.linkedCreditCardId } : prefill) }));
+  const [error, setError] = useState("");
   const [recurring, setRecurring] = useState(false);
   const editing = Boolean(transaction);
-  const availableCategories = state.categories.filter((category) => category.type === form.type && !category.system);
-
-  function changeType(type) {
-    setForm((current) => ({ ...current, type, category: state.categories.find((category) => category.type === type && !category.system)?.id || "" }));
+  const availableCategories = state.categories.filter((category) => category.type === form.type && !category.system && (!category.archived || category.id === form.category));
+  const fixedItems=(state.monthlyPlans || []).filter(plan=>plan.month <= form.date.slice(0,7)).flatMap(plan=>plan.expenses.filter(item=>item.classification === "fijo").map(item=>({...item,month:plan.month})));
+  function linkCommitment(value) {
+    const selected=fixedItems.find(item=>`${item.month}:${item.id}` === value);
+    const card=state.accounts.some(account=>account.id === selected?.linkedObligationId && account.type === "tarjeta_credito");
+    setForm(current=>({...current,planMonth:selected?.month || null,planItemId:selected?.id || null,completesCommitment:Boolean(selected),...(selected ? {category:selected.categoryId,linkedDebtId:card ? null : selected.linkedObligationId || null,linkedCreditCardId:card ? selected.linkedObligationId : null} : {})}));
   }
 
-  function handleSubmit(event) {
+  function changeType(type) {
+    setForm((current) => ({ ...current, type, category: state.categories.find((category) => category.type === type && !category.system && !category.archived)?.id || "" }));
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault();
     const movementAmount = Number(form.amount);
     if (!form.description.trim() || !Number.isFinite(movementAmount) || movementAmount <= 0 || !form.accountId || !form.date) return;
+    let result;
     if (editing) {
-      dispatch({ type: "UPDATE_TRANSACTION", payload: { id: transaction.id, ...form, description: form.description.trim(), amount: movementAmount } });
+      result = await dispatch({ type: "UPDATE_TRANSACTION", payload: { id: transaction.id, ...form, description: form.description.trim(), amount: movementAmount } });
     } else {
       const recurringId = recurring ? `rec-${Date.now()}-${Math.floor(Math.random() * 10000)}` : null;
       if (recurringId) {
         const date = parseDate(form.date);
-        dispatch({
+        result = await dispatch({
           type: "ADD_TRANSACTION_WITH_RECURRENCE",
           payload: {
             transaction: { ...form, description: form.description.trim(), amount: movementAmount, recurringId },
@@ -41,10 +49,11 @@ export function TransactionForm({ initialType = "gasto", lockType = false, trans
           },
         });
       } else {
-        dispatch({ type: "ADD_TRANSACTION", payload: { ...form, description: form.description.trim(), amount: movementAmount, recurringId: null } });
+        result = await dispatch({ type: "ADD_TRANSACTION", payload: { ...form, description: form.description.trim(), amount: movementAmount, recurringId: null } });
       }
-      setForm(buildInitialForm(state, form.type));
+      if (result?.ok !== false) setForm(buildInitialForm(state, form.type));
     }
+    if (result?.ok === false) { setError(result.error || "No se pudo guardar el movimiento."); return; }
     onSuccess?.(form.type);
   }
 
@@ -52,8 +61,10 @@ export function TransactionForm({ initialType = "gasto", lockType = false, trans
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      {!lockType ? <div className="grid grid-cols-2 gap-2" role="group" aria-label="Tipo de movimiento"><Button type="button" variant={form.type === "ingreso" ? "primary" : "secondary"} onClick={() => changeType("ingreso")}>Ingreso</Button><Button type="button" variant={form.type === "gasto" ? "primary" : "secondary"} onClick={() => changeType("gasto")}>Gasto</Button></div> : null}
+      {!lockType && !form.planItemId && !form.linkedDebtId && !form.linkedCreditCardId ? <div className="grid grid-cols-2 gap-2" role="group" aria-label="Tipo de movimiento"><Button type="button" variant={form.type === "ingreso" ? "primary" : "secondary"} onClick={() => changeType("ingreso")}>Ingreso</Button><Button type="button" variant={form.type === "gasto" ? "primary" : "secondary"} onClick={() => changeType("gasto")}>Gasto</Button></div> : null}
       <Field label="Descripción"><Input value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder={form.type === "ingreso" ? "Sueldo mensual" : "Ej. Supermercado"} required /></Field>
+      {form.type === "gasto" && fixedItems.length ? <Field label="Compromiso fijo que paga este movimiento"><Select value={form.planItemId ? `${form.planMonth}:${form.planItemId}` : ""} onChange={event=>linkCommitment(event.target.value)}><option value="">No vinculado a un compromiso</option>{fixedItems.map(item=><option key={`${item.month}:${item.id}`} value={`${item.month}:${item.id}`}>{item.month} · {item.name || item.categorySnapshot?.name}</option>)}</Select></Field> : null}
+      {form.planItemId ? <div className="rounded bg-paper-raised p-3 text-sm"><p>Pago vinculado al compromiso de {form.planMonth}. Solo se descontará una vez.</p><label className="flex items-center gap-2 mt-2"><input type="checkbox" checked={Boolean(form.completesCommitment)} onChange={event=>setForm({...form,completesCommitment:event.target.checked})} />Este pago completa el compromiso, aunque el monto sea distinto del estimado</label></div> : null}
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label={`Monto (${state.profile.currency === "USD" ? "USD" : "Bs"})`}><Input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} required /></Field>
         <Field label="Fecha"><Input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} required /></Field>
@@ -64,6 +75,7 @@ export function TransactionForm({ initialType = "gasto", lockType = false, trans
       </div>
       <Field label="Método de pago"><Select value={form.paymentMethod} onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value }))}>{state.paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</Select></Field>
       {!editing ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={recurring} onChange={(event) => setRecurring(event.target.checked)} /> Repetir mensualmente y usar en proyecciones</label> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
       <Button type="submit" className="mt-1">{submitLabel || (editing ? "Guardar cambios" : "Guardar")}</Button>
     </form>
   );

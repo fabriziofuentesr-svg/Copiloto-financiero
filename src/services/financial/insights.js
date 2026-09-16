@@ -1,10 +1,17 @@
 import { calculateFinancialHealth, getCategoryTrends, getMonthlyComparison, getTotalDebtInstallments, projectCashFlow } from "./calculations.js";
 import { estimateGoalCompletion, goalProgress } from "./goals.js";
 import { fmtBs, fmtPct } from "./format.js";
+import { monthlyPlanStatus, monthKey } from "./monthlyPlan.js";
 
 export function generateInsights(state, referenceDate = new Date()) {
   const insights = [];
   const currency = state.profile?.currency || "BOB";
+  const month=monthlyPlanStatus(state,monthKey(referenceDate),referenceDate);
+  if(month.plan) {
+    month.alerts.forEach(item=>insights.push({id:`limit-${item.id}`,level:"warning",title:`${item.categorySnapshot.name}: ${item.alert === "superado" ? "límite superado" : item.alert === "alcanzado" ? "límite alcanzado" : "cerca del límite"}`,detail:`Gastaste ${fmtBs(item.actual,currency)} de ${fmtBs(item.estimated,currency)} previstos. ${item.alert === "superado" ? "Revisa si faltan gastos y ajusta tu estimación en Mi mes." : `Quedan ${fmtBs(item.remaining,currency)} dentro del límite.`}`}));
+    if(month.closing !== null && month.closing<month.target) insights.push({id:"closing-target",level:month.closing<0 ? "danger" : "warning",title:"Revisa el objetivo de cierre",detail:`Disponible estimado ${fmtBs(month.closing,currency)}; objetivo ${fmtBs(month.target,currency)}. Faltan ${fmtBs(month.target-month.closing,currency)}. Tu prioridad: ${month.plan.priority}.`});
+    if(!month.plan.recordsComplete) insights.push({id:"incomplete-month",level:"warning",title:"Completa los registros de este mes",detail:"Indicaste que faltan movimientos. La proyección es de baja confianza; registra ingresos y gastos en Movimientos."});
+  }
   const comparison = getMonthlyComparison(state, referenceDate);
   if (comparison.available) {
     getCategoryTrends(state, referenceDate).filter((item) => item.change !== null && Math.abs(item.change) >= 0.2).forEach((item) => {
@@ -18,8 +25,8 @@ export function generateInsights(state, referenceDate = new Date()) {
 
   (state.goals || []).forEach((goal) => { const estimate = estimateGoalCompletion(goal); if (goalProgress(goal).progresoPct < 1 && estimate.months > 24) insights.push({ id: `goal-${goal.id}`, level: "warning", title: `El objetivo “${goal.name}” necesita más tiempo`, detail: `Con ${fmtBs(goal.monthlyContribution, currency)} al mes tardarías aproximadamente ${estimate.months} meses.` }); });
 
-  const projection = projectCashFlow(state, { mode: "rolling_30", referenceDate });
-  if (projection.available && projection.atRisk) insights.push({ id: "cash-risk", level: "danger", title: "Riesgo de liquidez en los próximos 30 días", detail: "La proyección cae por debajo de cero al incluir compromisos, deuda y gastos estimados." });
+  const projection = projectCashFlow(state, { mode: month.plan ? "month_end" : "rolling_30", referenceDate });
+  if (projection.available && (projection.atRisk || (projection.end !== null && projection.end < 0))) insights.push({ id: "cash-risk", level: "danger", title: "Riesgo de liquidez en la proyección", detail: "La proyección cae por debajo de cero al incluir compromisos, deuda y gastos estimados." });
 
   if (!comparison.available) {
     const real = (state.transactions || []).filter((item) => item.origin === "user" && (item.type === "ingreso" || item.type === "gasto"));

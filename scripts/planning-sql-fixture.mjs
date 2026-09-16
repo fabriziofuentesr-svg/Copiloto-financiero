@@ -1,0 +1,53 @@
+// Prints an integration query. All fictitious users and writes are rolled back.
+import { buildEmptyState } from '../src/data/mockData.js';
+import { financeReducer as reduce } from '../src/services/financeReducer.js';
+import { monthKey } from '../src/services/financial/monthlyPlan.js';
+import { localDateString } from '../src/services/financial/format.js';
+let state=buildEmptyState();
+state.profile={...state.profile,name:'Prueba SQL',onboardingCompleted:true};
+state=reduce(state,{type:'CREATE_ACCOUNT',payload:{id:'cash',name:'Diaria',type:'efectivo',balance:2400,requestId:'cash-opening'}});
+state=reduce(state,{type:'CREATE_ACCOUNT',payload:{id:'card',name:'Visa',type:'tarjeta_credito',balance:500,minimumPayment:50,creditLimit:1000,requestId:'card-opening'}});
+state.goals=[{id:'trip',name:'Viaje',target:10000,current:0,monthlyContribution:0}];
+state.debts=[{id:'manual',name:'Visa',linkedAccountId:'card',principal:500,balance:500,rate:0,installment:50}];
+state=reduce(state,{type:'SAVE_MONTHLY_PLAN',payload:{month:monthKey(),incomes:[],expenses:[{id:'rent',name:'Alquiler',categoryId:'vivienda',estimated:900}],savings:[],closingTarget:0,recordsComplete:true,emergency:{status:'unknown'}}});
+state=reduce(state,{type:'ADD_TRANSACTION',payload:{id:'rent-payment',description:'Alquiler',type:'gasto',category:'vivienda',amount:850,accountId:'cash',date:localDateString(),planMonth:monthKey(),planItemId:'rent',completesCommitment:true}});
+state=reduce(state,{type:'ADD_TRANSACTION',payload:{id:'visa-payment',description:'Pago Visa',type:'gasto',category:'deudas',amount:50,accountId:'cash',date:localDateString(),linkedDebtId:'manual'}});
+state=reduce(state,{type:'SAVINGS_OPERATION',payload:{goalId:'trip',accountId:'cash',method:'protect',amount:500,requestId:'protected-trip'}});
+const rent=state.transactions.find(tx=>tx.description==='Alquiler');
+const edited=reduce(state,{type:'UPDATE_TRANSACTION',payload:{id:rent.id,amount:900,category:'vivienda'}});
+const removed=reduce(edited,{type:'DELETE_TRANSACTION',payload:rent.id});
+const json=value=>`$fixture$${JSON.stringify(value)}$fixture$::jsonb`;
+console.log(`begin;
+select set_config('copiloto.test_user',gen_random_uuid()::text,true);
+select set_config('copiloto.test_other',gen_random_uuid()::text,true);
+insert into auth.users(id,aud,role,email,encrypted_password) values(current_setting('copiloto.test_user')::uuid,'authenticated','authenticated','sql-test-'||current_setting('copiloto.test_user')||'@example.test',''),(current_setting('copiloto.test_other')::uuid,'authenticated','authenticated','sql-test-'||current_setting('copiloto.test_other')||'@example.test','');
+set local role authenticated;
+select set_config('request.jwt.claims',jsonb_build_object('sub',current_setting('copiloto.test_user'),'role','authenticated')::text,true);
+do $verify$
+declare r jsonb; again jsonb; s jsonb := ${json(state)}; value numeric;
+begin
+ r:=public.apply_finance_state(s,0,'planning-test');
+ if (r->>'revision')::int<>1 or jsonb_array_length(r#>'{state,monthlyPlans}')<>1 or jsonb_array_length(r#>'{state,savingsAllocations}')<>1 then raise exception 'planning persistence failed'; end if;
+ if not exists(select 1 from jsonb_array_elements(r#>'{state,transactions}') x where x->>'planItemId'='rent' and (x->>'completesCommitment')::boolean) then raise exception 'payment metadata lost'; end if;
+ select (x->>'balance')::numeric into value from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='cash';
+ if value<>1500 then raise exception 'cash mismatch: %',value; end if;
+ select (x->>'balance')::numeric into value from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='card';
+ if value<>-450 then raise exception 'card mismatch: %',value; end if;
+ if (select count(*) from public.transaction_entries where id like '%:card-entry')<>1 then raise exception 'card entry missing'; end if;
+ again:=public.apply_finance_state(s,0,'planning-test');
+ if again<>r then raise exception 'idempotence failed'; end if;
+ r:=public.apply_finance_state(${json(edited)},1,'planning-edit');
+ select (x->>'balance')::numeric into value from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='cash';
+ if value<>1450 then raise exception 'edit mismatch: %',value; end if;
+ r:=public.apply_finance_state(${json(removed)},2,'planning-delete');
+ select (x->>'balance')::numeric into value from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='cash';
+ if value<>2350 then raise exception 'delete mismatch: %',value; end if;
+ if not exists(select 1 from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='card' and (x->>'balance')::numeric=-450) then raise exception 'card reconciliation drift'; end if;
+end $verify$;
+select set_config('request.jwt.claims',jsonb_build_object('sub',current_setting('copiloto.test_other'),'role','authenticated')::text,true);
+do $verify$ begin
+ if exists(select 1 from public.finance_planning) or exists(select 1 from public.accounts) then raise exception 'cross-user read allowed'; end if;
+end $verify$;
+reset role;
+select 'planning, savings, snapshots, card ledger, edit, deletion, idempotence and user isolation passed' as verification;
+rollback;`);

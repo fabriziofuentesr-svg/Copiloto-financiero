@@ -15,7 +15,7 @@ export function BottomNav() {
           }
         >
           <Icon size={19} aria-hidden="true" />
-          <span className="truncate w-full text-center">{label}</span>
+          <span className="w-full text-center leading-tight whitespace-normal">{label}</span>
         </NavLink>
       ))}
     </nav>

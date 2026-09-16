@@ -11,6 +11,7 @@
 // sin importar cuándo se abra la app.
 
 import { addDays } from "../services/financial/format.js";
+import { normalizeCategory } from "../services/categories.js";
 
 export const CATEGORIES = [
   { id: "saldo_inicial", name: "Saldo inicial", type: "ingreso", essential: false, color: "#7A6A53", system: true },
@@ -121,7 +122,7 @@ export const DEMO_PROFILE = {
 // Perfil inicial de un usuario que todavía no configuró nada.
 export function buildEmptyProfile() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     name: "",
     currency: "BOB",
     employmentType: "",
@@ -139,7 +140,9 @@ export function buildEmptyState() {
     profile: buildEmptyProfile(),
     accounts: [],
     transactions: [],
-    categories: CATEGORIES,
+    categories: CATEGORIES.map(normalizeCategory),
+    monthlyPlans: [],
+    savingsAllocations: [],
     paymentMethods: PAYMENT_METHODS,
     goals: [],
     debts: [],
@@ -167,7 +170,7 @@ export function buildEmptyState() {
 // carga automáticamente: hay que pedirlo explícitamente desde Configuración.
 export function buildDemoState() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     profile: DEMO_PROFILE,
     accounts: ACCOUNTS,
     transactions: TRANSACTIONS,
