@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.jsx";
-import { Card, Button, Modal, Field, Input, ProgressBar } from "../components/ui/primitives.jsx";
+import { Card, Button, Modal, Field, Input, ProgressBar, Select , MoneyInput } from "../components/ui/primitives.jsx";
 import { GoalCard, DebtCard } from "../components/finance/cards.jsx";
 import { estimateGoalCompletion } from "../services/financial/goals.js";
 import { compareExtraPayment } from "../services/financial/debts.js";
@@ -13,7 +13,7 @@ import { SavingsOperationForm } from "../components/finance/SavingsOperationForm
 import { Link, useNavigate } from "react-router-dom";
 
 function currencyLabel(currency) {
-  return currency === "USD" ? "USD" : "Bs";
+  return currency === "USD" ? "USD" : "Bs.";
 }
 
 export default function Planes() {
@@ -37,20 +37,20 @@ function Objetivos({ autoOpen }) {
   const currency = state.profile?.currency || "BOB";
   const unit = currencyLabel(currency);
   const [modalOpen, setModalOpen] = useState(autoOpen);
-  const [form, setForm] = useState({ name: "", target: "", current: "", monthlyContribution: "" });
+  const [form, setForm] = useState({ name: "", target: "", current: "", monthlyContribution: "", contributionFrequency: "mensual" });
   const [editingGoal, setEditingGoal] = useState(null);
   const [simGoal, setSimGoal] = useState(null);
   const [simAporte, setSimAporte] = useState("");
   const [aporteGoal, setAporteGoal] = useState(null);
 
 
-  function guardar(e) {
+  async function guardar(e) {
     e.preventDefault();
     const target = Number(form.target);
     const current = editingGoal?.current || 0;
     const monthlyContribution = Number(form.monthlyContribution || 0);
     if (!form.name.trim() || !Number.isFinite(target) || target <= 0 || !Number.isFinite(current) || current < 0 || !Number.isFinite(monthlyContribution) || monthlyContribution < 0) return;
-    dispatch({
+    const result = await dispatch({
       type: editingGoal ? "UPDATE_GOAL" : "ADD_GOAL",
       payload: {
         ...(editingGoal ? { id: editingGoal.id } : {}),
@@ -58,9 +58,11 @@ function Objetivos({ autoOpen }) {
         target,
         current,
         monthlyContribution,
+        contributionFrequency: form.contributionFrequency || "mensual",
       },
     });
-    setForm({ name: "", target: "", current: "", monthlyContribution: "" });
+    if (result?.ok === false) return;
+    setForm({ name: "", target: "", current: "", monthlyContribution: "", contributionFrequency: "mensual" });
     setEditingGoal(null);
     setModalOpen(false);
   }
@@ -70,8 +72,8 @@ function Objetivos({ autoOpen }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => { setEditingGoal(null); setForm({ name: "", target: "", current: "", monthlyContribution: "" }); setModalOpen(true); }}>
-          <Plus size={14} /> Nuevo objetivo
+        <Button size="sm" onClick={() => { setEditingGoal(null); setForm({ name: "", target: "", current: "", monthlyContribution: "", contributionFrequency: "mensual" }); setModalOpen(true); }}>
+          <Plus size={14} /> Nuevo plan de ahorro
         </Button>
       </div>
       <div className="grid sm:grid-cols-2 gap-4">
@@ -80,8 +82,8 @@ function Objetivos({ autoOpen }) {
             key={g.id}
             goal={g}
             currency={currency}
-            onDelete={() => { if (state.savingsAllocations.some(item=>item.goalId === g.id && item.amount > 0)) { window.alert("Libera primero los aportes vinculados a este plan."); return; } if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
-            onEdit={() => { setEditingGoal(g); setForm({ name: g.name, target: String(g.target), current: String(g.current), monthlyContribution: String(g.monthlyContribution || 0) }); setModalOpen(true); }}
+            onDelete={g.system === "standard_savings" ? undefined : () => { if (state.savingsAllocations.some(item=>item.goalId === g.id && item.amount > 0)) { window.alert("Libera primero los aportes vinculados a este plan."); return; } if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
+            onEdit={g.system === "standard_savings" ? undefined : () => { setEditingGoal(g); setForm({ name: g.name, target: String(g.target), current: String(g.current), monthlyContribution: String(g.monthlyContribution || 0), contributionFrequency: g.contributionFrequency || "mensual" }); setModalOpen(true); }}
             onAdd={() => {
               setAporteGoal(g);
 
@@ -99,37 +101,38 @@ function Objetivos({ autoOpen }) {
         <SavingsOperationForm key={aporteGoal?.id} goalId={aporteGoal?.id} onSuccess={()=>setAporteGoal(null)} />
       </Modal>
 
-      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingGoal(null); }} title={editingGoal ? `Editar objetivo — ${editingGoal.name}` : "Nuevo objetivo"}>
+      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditingGoal(null); }} title={editingGoal ? `Editar plan de ahorro — ${editingGoal.name}` : "Nuevo plan de ahorro"}>
         <form onSubmit={guardar} className="flex flex-col gap-3">
-          <Field label="Nombre del objetivo">
+          <Field label="Nombre del plan de ahorro">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej. Comprar un auto" required />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={`Monto objetivo (${unit})`}>
-              <Input type="number" min="0.01" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} required />
+              <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} required />
             </Field>
             <Field label={`Ya tienes (${unit})`}>
               <Input type="number" value={editingGoal?.current || 0} disabled />
             </Field>
           </div>
           <p className="text-xs text-ink-soft">El avance se actualiza al registrar aportes respaldados por cuentas. Los avances anteriores se conservan; no se consideran dinero protegido hasta vincular aportes.</p>
-          <Field label={`Aporte mensual (${unit})`}>
-            <Input type="number" min="0" step="0.01" value={form.monthlyContribution} onChange={(e) => setForm({ ...form, monthlyContribution: e.target.value })} />
+          <Field label={`Aporte por periodo (${unit})`}>
+            <MoneyInput currency={state.profile.currency} type="number" min="0" step="0.01" value={form.monthlyContribution} onChange={(e) => setForm({ ...form, monthlyContribution: e.target.value })} />
           </Field>
+          <Field label="Frecuencia del aporte previsto"><Select value={form.contributionFrequency || "mensual"} onChange={event=>setForm({...form,contributionFrequency:event.target.value})}><option value="mensual">Mensual</option><option value="semanal">Semanal</option></Select></Field><p className="text-xs text-ink-soft">Es una intención; no crea aportes ni transferencias automáticas.</p>
           <Button type="submit" className="mt-2">{editingGoal ? "Guardar cambios" : "Guardar"}</Button>
         </form>
       </Modal>
 
       <Modal open={Boolean(simGoal)} onClose={() => setSimGoal(null)} title={`Simulador — ${simGoal?.name || ""}`}>
         <div className="flex flex-col gap-3">
-          <Field label={`¿Qué pasa si ahorro (${unit}/mes)?`}>
+          <Field label={`¿Qué pasa si ahorro (${unit}/${simGoal?.contributionFrequency === "semanal" ? "semana" : "mes"})?`}>
             <Input type="number" value={simAporte} onChange={(e) => setSimAporte(e.target.value)} />
           </Field>
           {simulacion && (
             <p className="text-sm">
-              {simulacion.months == null
+              {simulacion.date == null
                 ? "Con ese aporte nunca llegarías a la meta."
-                : `Alcanzarías el objetivo en ${simulacion.months} meses (${simulacion.date.toLocaleDateString("es-BO", { month: "long", year: "numeric" })}).`}
+                : `Alcanzarías el objetivo en ${simulacion.periods ?? simulacion.months} ${simGoal.contributionFrequency === "semanal" ? "semanas" : "meses"} (${simulacion.date.toLocaleDateString("es-BO", { month: "long", year: "numeric" })}).`}
             </p>
           )}
           <Button
@@ -295,7 +298,7 @@ export function Deudas() {
           {creditCards.length ? <Field label="Tarjeta vinculada (evita duplicar la deuda)"><select className="w-full rounded border border-line bg-paper-raised px-3 py-2 text-sm" value={form.linkedAccountId} onChange={(e) => setForm({ ...form, linkedAccountId: e.target.value })}><option value="">No corresponde a una tarjeta</option>{creditCards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select></Field> : null}
           <div className="grid grid-cols-2 gap-3">
             <Field label={`Saldo actual (${unit})`}>
-              <Input type="number" min="0.01" step="0.01" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} required />
+              <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} required />
             </Field>
             <Field label="Tasa anual (%)">
               <Input type="number" min="0" max="300" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
@@ -303,7 +306,7 @@ export function Deudas() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label={`Cuota mensual (${unit})`}>
-              <Input type="number" min="0.01" step="0.01" value={form.installment} onChange={(e) => setForm({ ...form, installment: e.target.value })} required />
+              <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={form.installment} onChange={(e) => setForm({ ...form, installment: e.target.value })} required />
             </Field>
             <Field label="Día de pago">
               <Input type="number" min="1" max="28" value={form.paymentDay} onChange={(e) => setForm({ ...form, paymentDay: e.target.value })} />

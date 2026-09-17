@@ -19,7 +19,7 @@ export function applySavingsOperation(state, payload, uid, now = new Date()) {
   if (payload.method === "release") {
     if (amount > money(existing?.amount)) throw new Error("Solo puedes liberar dinero vinculado a este plan y cuenta.");
   } else {
-    const remaining=payload.method === "reconcile" ? money(goal.current-allocations.filter(item=>item.goalId === goal.id).reduce((total,item)=>total+item.amount,0)) : money(goal.target-goal.current);
+    const remaining=payload.method === "reconcile" ? money(goal.current-allocations.filter(item=>item.goalId === goal.id).reduce((total,item)=>total+item.amount,0)) : goal.system === "standard_savings" ? Infinity : money(goal.target-goal.current);
     if (amount > remaining) throw new Error(payload.method === "reconcile" ? "El monto supera el avance anterior todavía sin vincular." : "El aporte supera lo que falta para el plan.");
     if (amount > money(account.balance-allocated)) throw new Error("La cuenta no tiene suficiente dinero libre.");
     const free=calculateAvailableMoney(state,now).available;

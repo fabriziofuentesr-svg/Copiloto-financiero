@@ -1,6 +1,7 @@
 import { buildEmptyState, CATEGORIES } from "../data/mockData.js";
 import { normalizeCategory } from "./categories.js";
 import { categorySnapshot } from "./financial/monthlyPlan.js";
+import { ensureStandardSavings } from "./financial/standardSavings.js";
 
 export const CURRENT_SCHEMA_VERSION = 3;
 
@@ -37,12 +38,13 @@ export function migrateState(savedState) {
     ...item,
   }));
   const debts = (savedState.debts || []).map((debt) => ({ linkedAccountId: null, ...debt }));
-  return {
+  return ensureStandardSavings({
     ...empty,
     ...savedState,
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    profile: { ...empty.profile, ...(savedState.profile || {}) },
+    profile: { ...empty.profile, timezone: "America/La_Paz", ...(savedState.profile || {}) },
     accounts,
+    goals: (savedState.goals || []).map(goal=>({contributionFrequency:"mensual",...goal})),
     transactions,
     categories,
     monthlyPlans: savedState.monthlyPlans || [],
@@ -60,5 +62,5 @@ export function migrateState(savedState) {
       projection: { ...empty.financialSettings.projection, ...(savedState.financialSettings?.projection || {}) },
     },
     sectionGuidesSeen: savedState.sectionGuidesSeen || {},
-  };
+  });
 }

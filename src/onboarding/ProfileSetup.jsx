@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Card, Field, Input, Select, Button } from "../components/ui/primitives.jsx";
+import { Card, Field, Input, Select, Button , MoneyInput } from "../components/ui/primitives.jsx";
 
 const EMPLOYMENT_TYPES = [
   { value: "dependiente", label: "Dependiente (sueldo fijo)" },
@@ -56,7 +56,7 @@ export function ProfileForm({ initialValues, submitLabel = "Guardar", onSubmit }
         </Select>
       </Field>
       <Field label={"Ingreso mensual aproximado (" + (form.currency === "USD" ? "USD" : "Bs") + ")"}>
-        <Input
+        <MoneyInput currency={form.currency}
           type="number"
           min="0"
           step="0.01"

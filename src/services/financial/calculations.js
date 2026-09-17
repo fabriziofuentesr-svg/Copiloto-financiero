@@ -3,6 +3,8 @@
 // pero nunca se tratan como actividad operativa del mes.
 import { addDays, addMonths, clamp, daysBetweenInclusive, endOfMonth, localDateString, nextOccurrence, parseDate, startOfMonth } from "./format.js";
 import { isAssetAccount, isOperatingTransaction, isRealUserTransaction } from "./ledger.js";
+import { profileToday } from "./movementDates.js";
+import { actualMonth, actualFinancialHealth } from "./actualMonth.js";
 import { monthlyPlanStatus, monthlyHealth, monthKey as planMonthKey, spendingMoney } from "./monthlyPlan.js";
 
 function amount(value) {
@@ -26,7 +28,7 @@ function monthKey(value) {
 }
 
 export function getOperationalTransactions(state, start, end) {
-  return (state.transactions || []).filter((transaction) => isOperatingTransaction(transaction) && inPeriod(transaction.date, start, end));
+  return (state.transactions || []).filter((transaction) => isOperatingTransaction(transaction) && transaction.date <= profileToday(state.profile) && inPeriod(transaction.date, start, end));
 }
 
 export function summarizePeriod(state, start, end) {
@@ -53,7 +55,7 @@ export function getMonthTransactions(state, ref = new Date(), which = "current",
   const month = which === "current" ? startOfMonth(ref) : addMonths(startOfMonth(ref), -1);
   const start = startOfMonth(month);
   const end = endOfMonth(month);
-  return (state.transactions || []).filter((transaction) => inPeriod(transaction.date, start, end) && (!operationalOnly || isOperatingTransaction(transaction)));
+  return (state.transactions || []).filter((transaction) => inPeriod(transaction.date, start, end) && (!operationalOnly || (isOperatingTransaction(transaction) && transaction.date <= profileToday(state.profile))));
 }
 
 export function summarizeMonth(state, which = "current", referenceDate = new Date()) {
@@ -123,7 +125,7 @@ export function getCategoryTrends(state, referenceDate = new Date()) {
 }
 
 export function getSavingsRealized(state, start = startOfMonth(new Date()), end = new Date()) {
-  return amount((state.savingsContributions || []).filter((item) => item.method !== "reconcile" && inPeriod(item.date, start, end)).reduce((sum, item) => sum + (item.method === "release" ? -1 : 1) * amount(item.amount), 0));
+  return amount((state.savingsContributions || []).filter((item) => !["reconcile","reassign"].includes(item.method) && inPeriod(item.date, start, end)).reduce((sum, item) => sum + (item.method === "release" ? -1 : 1) * amount(item.amount), 0));
 }
 
 export function getTotalBalance(state) {
@@ -163,7 +165,12 @@ function addMonthlyOccurrences(items, record, kind, start, end) {
   let occurrence = record.nextDate ? dateOnly(record.nextDate) : day ? nextOccurrence(day, start) : null;
   if (!occurrence || Number.isNaN(occurrence.getTime())) return;
   const frequency = record.frequency || "mensual";
-  const advance = (date) => frequency === "semanal" ? addDays(date, 7) : frequency === "quincenal" ? addDays(date, 14) : addMonths(date, 1);
+  const anchor = day || occurrence.getDate();
+  const advance = (date) => {
+    if(frequency === "semanal") return addDays(date,7);
+    if(frequency === "quincenal") return addDays(date,14);
+    return new Date(date.getFullYear(),date.getMonth()+1,Math.min(anchor,new Date(date.getFullYear(),date.getMonth()+2,0).getDate()));
+  };
   while (occurrence < dateOnly(start)) occurrence = advance(occurrence);
   let guard = 0;
   while (occurrence <= dateOnly(end) && guard < 120) {
@@ -188,15 +195,15 @@ export function getUpcomingCommitments(state, days = 30, referenceDate = new Dat
   (state.recurringExpenses || []).forEach((item) => addMonthlyOccurrences(items, item, "gasto_recurrente", start, end));
   getManualDebts(state).filter((debt) => amount(debt.balance) > 0).forEach((debt) => addMonthlyOccurrences(items, debt, "deuda", start, end));
   (state.accounts || []).filter((account) => account.type === "tarjeta_credito" && amount(account.balance) < 0).forEach((account) => addMonthlyOccurrences(items, { ...account, id: account.id, name: `Pago mínimo — ${account.name}`, amount: account.minimumPayment }, "tarjeta", start, end));
-  (state.goals || []).filter((goal) => amount(goal.monthlyContribution) > 0 && amount(goal.current) < amount(goal.target)).forEach((goal) => addMonthlyOccurrences(items, { ...goal, dayOfMonth: goal.contributionDay || 28, amount: goal.monthlyContribution, name: `Aporte — ${goal.name}` }, "objetivo", start, end));
+  (state.goals || []).filter((goal) => amount(goal.monthlyContribution) > 0 && amount(goal.current) < amount(goal.target)).forEach((goal) => addMonthlyOccurrences(items, { ...goal, frequency:goal.contributionFrequency || "mensual", nextDate:goal.contributionFrequency === "semanal" ? goal.nextContributionDate || localDateString(start) : goal.nextContributionDate, dayOfMonth: goal.contributionDay || 28, amount: goal.monthlyContribution, name: `Aporte — ${goal.name}` }, "objetivo", start, end));
   return items.sort((a, b) => a.date - b.date);
 }
 
 export function calculateAvailableMoney(state, referenceDate = new Date()) {
   const plan = monthlyPlanStatus(state, planMonthKey(referenceDate), referenceDate);
   if (plan.plan) return {totalBalance:plan.cash.total,savings:plan.cash.savings,protectedMoney:plan.cash.protectedMoney,committed:amount(plan.fixedPending+plan.debtPending+plan.overduePending),available:plan.availableToday,commitments:[...plan.expenses.filter(item=>item.classification === "fijo" && item.pending>0),...plan.overdue].map(item=>({...item,amount:item.pending,date:parseDate(plan.endDate)}))};
-  const totalBalance = getTotalBalance(state);
-  const cash = spendingMoney(state);
+  const cash = actualMonth(state,planMonthKey(referenceDate),referenceDate).cash;
+  const totalBalance = cash.total;
   const commitments = getUpcomingCommitments(state, 30, referenceDate);
   const committed = amount(commitments.reduce((sum, item) => sum + item.amount, 0));
   return { totalBalance, savings:cash.savings,protectedMoney:cash.protectedMoney,committed, available: amount(cash.spendable - committed), commitments };
@@ -327,39 +334,7 @@ export function getFinancialHealthInputs(state, referenceDate = new Date()) {
 export const FINANCIAL_HEALTH_WEIGHTS = { flujoCaja: 0.35, reserva: 0.25, endeudamiento: 0.25, planificacion: 0.15 };
 
 export function calculateFinancialHealth(state, referenceDate = new Date()) {
-  if ((state.monthlyPlans || []).some(plan=>plan.month === planMonthKey(referenceDate))) return monthlyHealth(state,planMonthKey(referenceDate),referenceDate);
-  const inputs = getFinancialHealthInputs(state, referenceDate);
-  if (inputs.missing.length) return { available: false, score: null, breakdown: null, missing: inputs.missing, confidence: "insuficiente", resumen: "Salud financiera aún no disponible" };
-  const { ingresos, gastos } = inputs.period;
-  const goalCommitments = amount((state.goals || []).filter((goal) => amount(goal.current) < amount(goal.target)).reduce((sum, goal) => sum + amount(goal.monthlyContribution), 0));
-  const margin = amount(ingresos - gastos - inputs.debtPayments - goalCommitments);
-  const targetRate = state.financialSettings.savingsTargetType === "percentage" ? Number(state.financialSettings.savingsTargetValue) / 100 : Number(state.financialSettings.savingsTargetValue) / ingresos;
-  const actualRate = ingresos > 0 ? margin / ingresos : 0;
-  const cashScore = clamp((actualRate / Math.max(0.01, targetRate)) * 100, 0, 100);
-  const emergencyTarget = inputs.essentialExpenses * Math.max(1, Number(state.emergencyFund.monthsTarget) || 3);
-  const reserveRatio = emergencyTarget > 0 ? Number(state.emergencyFund.current) / emergencyTarget : 0;
-  const reserveScore = clamp(reserveRatio * 100, 0, 100);
-  const dti = ingresos > 0 ? inputs.debtPayments / ingresos : 1;
-  const debtScore = state.financialSettings.debtStatus === "none" ? 100 : clamp(100 - dti * 180, 0, 100);
-  const planningCriteria = [
-    { met: state.financialSettings.essentialExpensesConfigured, label: "gastos esenciales definidos" },
-    { met: Number(state.financialSettings.savingsTargetValue) > 0, label: "meta de ahorro definida" },
-    { met: state.emergencyFund.configured, label: "fondo de emergencia configurado" },
-    { met: state.financialSettings.debtStatus === "none" || getTotalDebtBalance(state) > 0, label: "deudas revisadas" },
-  ];
-  const planningScore = planningCriteria.filter((criterion) => criterion.met).length * 25;
-  const breakdown = {
-    flujoCaja: { score: Math.round(cashScore), weight: FINANCIAL_HEALTH_WEIGHTS.flujoCaja, reason: `Quedan ${amount(margin)} después de gastos, deuda y aportes planificados.`, action: margin < 0 ? "Reduce gastos o compromisos mensuales." : "Mantén un margen acorde con tu meta de ahorro." },
-    reserva: { score: Math.round(reserveScore), weight: FINANCIAL_HEALTH_WEIGHTS.reserva, reason: `Tu fondo cubre ${inputs.essentialExpenses > 0 ? (Number(state.emergencyFund.current) / inputs.essentialExpenses).toFixed(1) : "0"} meses esenciales.`, action: reserveRatio < 1 ? "Aumenta tu fondo hasta el objetivo configurado." : "Conserva esta reserva separada de gastos cotidianos." },
-    endeudamiento: { score: Math.round(debtScore), weight: FINANCIAL_HEALTH_WEIGHTS.endeudamiento, reason: `Los pagos mensuales de deuda equivalen al ${Math.round(dti * 100)}% del ingreso operativo.`, action: dti > 0.35 ? "Prioriza la deuda de mayor tasa y evita nuevas cuotas." : "Mantén tus pagos al día." },
-    planificacion: { score: Math.round(planningScore), weight: FINANCIAL_HEALTH_WEIGHTS.planificacion, reason: `${planningCriteria.filter((criterion) => criterion.met).length} de 4 elementos básicos están configurados.`, action: planningScore < 100 ? `Completa: ${planningCriteria.filter((criterion) => !criterion.met).map((criterion) => criterion.label).join(", ")}.` : "Revisa tus supuestos cuando cambie tu situación." },
-  };
-  const score = Math.round(Object.values(breakdown).reduce((sum, item) => sum + item.score * item.weight, 0));
-  const comparison = getMonthlyComparison(state, referenceDate);
-  const confidence = comparison.available && comparison.confidence !== "baja" ? "alta" : "media";
-  const lowest = Object.entries(breakdown).sort((a, b) => a[1].score - b[1].score)[0];
-  const labels = { flujoCaja: "flujo de caja", reserva: "reserva", endeudamiento: "endeudamiento", planificacion: "planificación" };
-  return { available: true, score, breakdown, weights: FINANCIAL_HEALTH_WEIGHTS, confidence, missing: [], dti, margin, coverageMonths: Number(state.emergencyFund.current) / inputs.essentialExpenses, resumen: `Tu principal oportunidad está en ${labels[lowest[0]]}.`, inputs };
+  return actualFinancialHealth(state,planMonthKey(referenceDate),referenceDate);
 }
 
 export function hasFinancialData(state) {

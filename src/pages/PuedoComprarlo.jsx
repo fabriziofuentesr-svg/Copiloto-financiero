@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFinanceState } from "../context/FinanceContext.jsx";
 import { AlertBanner } from "../components/finance/cards.jsx";
-import { Button, Card, Field, Input } from "../components/ui/primitives.jsx";
+import { Button, Card, Field, Input , MoneyInput } from "../components/ui/primitives.jsx";
 import { evaluatePurchase } from "../services/financial/purchaseAdvisor.js";
 import { fmtBs } from "../services/financial/format.js";
 
@@ -16,7 +16,7 @@ export default function PuedoComprarlo() {
   const marker = result?.verdict === "si" ? "🟢" : result?.verdict === "precaucion" ? "🟡" : result?.verdict === "incomplete" ? "ℹ️" : "🔴";
   return <div className="flex flex-col gap-5 max-w-4xl">
     <div><h1 className="font-display text-2xl font-semibold">¿Puedo comprarlo?</h1><p className="text-ink-soft text-sm mt-1">Revisamos liquidez, compromisos, deuda, reserva, objetivos y proyección antes de responder.</p></div>
-    <Card><form onSubmit={evaluate} className="grid sm:grid-cols-[1fr_12rem_auto] gap-3 items-end"><Field label="¿Qué quieres comprar?"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Laptop" /></Field><Field label={`Precio (${state.profile.currency === "USD" ? "USD" : "Bs"})`}><Input type="number" min="0.01" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} required /></Field><Button type="submit">Evaluar</Button></form></Card>
+    <Card><form onSubmit={evaluate} className="grid sm:grid-cols-[1fr_12rem_auto] gap-3 items-end"><Field label="¿Qué quieres comprar?"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Laptop" /></Field><Field label={`Precio (${state.profile.currency === "USD" ? "USD" : "Bs"})`}><MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} required /></Field><Button type="submit">Evaluar</Button></form></Card>
     {result ? <>
       <AlertBanner level={level}><p className="font-semibold">{marker} {result.label}</p><p className="mt-1">{result.explanation}</p>{name ? <p className="text-xs mt-2">{name} · {fmtBs(result.price, state.profile.currency)}</p> : null}</AlertBanner>
       <div className="grid md:grid-cols-2 gap-4">

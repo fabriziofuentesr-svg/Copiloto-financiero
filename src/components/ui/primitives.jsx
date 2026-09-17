@@ -33,6 +33,8 @@ export function Button({ children, variant = "primary", size = "md", className =
 
 export function Modal({ open, onClose, title, children }) {
   const dialogRef = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   const titleId = useId();
   useEffect(() => {
     if (!open) return undefined;
@@ -42,7 +44,7 @@ export function Modal({ open, onClose, title, children }) {
     dialog?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])")?.focus();
     function onKeyDown(event) {
       if ([...document.querySelectorAll('[role="dialog"]')].at(-1) !== dialog) return;
-      if (event.key === "Escape" && onClose) onClose();
+      if (event.key === "Escape") closeRef.current?.();
       if (event.key === "Tab") {
         const items = [...(dialog?.querySelectorAll(focusableSelector) || [])];
         if (!items.length) return;
@@ -54,7 +56,7 @@ export function Modal({ open, onClose, title, children }) {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => { document.removeEventListener("keydown", onKeyDown); previous?.focus?.(); };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink/40 p-0 sm:p-4">
@@ -85,6 +87,10 @@ const inputClass =
 
 export function Input({ className = "", ...props }) {
   return <input className={`${inputClass} ${className}`} {...props} />;
+}
+
+export function MoneyInput({ currency = "BOB", className = "", ...props }) {
+  return <span className="relative flex items-center"><span className="absolute left-3 text-sm text-ink-soft pointer-events-none" aria-hidden="true">{currency === "USD" ? "USD" : "Bs."}</span><Input {...props} className={`pl-12 w-full min-w-0 ${className}`} /></span>;
 }
 
 export function Select({ children, className = "", ...props }) {

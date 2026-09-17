@@ -51,25 +51,25 @@ export function GoalCard({ goal, currency = "BOB", onDelete, onOpen, onAdd, onEd
         <div className="flex gap-2">{onEdit ? <button onClick={onEdit} className="text-ink-soft hover:text-teal" aria-label={`Editar ${goal.name}`}><Pencil size={14} /></button> : null}{onDelete ? <button onClick={onDelete} className="text-ink-soft hover:text-brick" aria-label={`Eliminar ${goal.name}`}><Trash2 size={14} /></button> : null}</div>
       </div>
       <div className="text-ink-soft text-xs">
-        {fmtBs(goal.current, currency)} de {fmtBs(goal.target, currency)} · {fmtPct(progresoPct)}
+        {goal.system === "standard_savings" ? `${fmtBs(goal.current,currency)} vinculados a tus cuentas` : `${fmtBs(goal.current,currency)} de ${fmtBs(goal.target,currency)} · ${fmtPct(progresoPct)}`}
       </div>
-      <ProgressBar value={progresoPct * 100} color="#1F5C56" />
+      {goal.system !== "standard_savings" ? <ProgressBar value={progresoPct * 100} color="#1F5C56" /> : null}
       <div className="text-ink-soft text-xs">
-        {est.months == null
+        {goal.system === "standard_savings" ? "Dinero existente sin un objetivo específico; puedes reasignarlo a otro plan." : est.date == null
           ? "Define un aporte mensual para estimar la fecha."
-          : `A ${fmtBs(goal.monthlyContribution, currency)}/mes, la alcanzas en ${est.months} meses (${est.date.toLocaleDateString("es-BO", { month: "long", year: "numeric" })}).`}
+          : `A ${fmtBs(goal.monthlyContribution,currency)} por ${goal.contributionFrequency === "semanal" ? "semana" : "mes"}, la alcanzas en ${est.periods ?? est.months} ${goal.contributionFrequency === "semanal" ? "semanas" : "meses"} (${est.date.toLocaleDateString("es-BO")}).`}
       </div>
       {onAdd && (
         <button onClick={onAdd} className="text-ochre text-xs underline text-left mt-1">
           Registrar aporte
         </button>
       )}
-      {onOpen && (
+      {onOpen && goal.system !== "standard_savings" && (
         <button onClick={onOpen} className="text-ochre text-xs underline text-left mt-1">
           Simular otro aporte
         </button>
       )}
-      {restante === 0 && <Badge level="positive">Objetivo alcanzado</Badge>}
+      {restante === 0 && goal.system !== "standard_savings" && <Badge level="positive">Objetivo alcanzado</Badge>}
     </div>
   );
 }

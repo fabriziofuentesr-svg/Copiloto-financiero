@@ -106,8 +106,8 @@ export function answerQuestion(state, question, referenceDate = new Date()) {
     const goal = requestedGoal || (state.goals || [])[0];
     if (!goal) return "Entendí que preguntas por un objetivo. Crea uno en Planes de Ahorro e indica monto y aporte mensual.";
     const estimate = estimateGoalCompletion(goal);
-    if (estimate.months === null) return `“${goal.name}” no tiene un aporte mensual mayor a cero. Edítalo en Planes de Ahorro para calcular su fecha.`;
-    return `Con ${fmtBs(goal.monthlyContribution, currency)} al mes, alcanzarías “${goal.name}” en ${estimate.months} meses. Para acelerarlo, aumenta el aporte mensual en el simulador de Planes de Ahorro.`;
+    if (estimate.date === null) return `“${goal.name}” no tiene un aporte mensual mayor a cero. Edítalo en Planes de Ahorro para calcular su fecha.`;
+    return `Con ${fmtBs(goal.monthlyContribution, currency)} por ${goal.contributionFrequency === "semanal" ? "semana" : "mes"}, alcanzarías “${goal.name}” en ${estimate.periods ?? estimate.months} ${goal.contributionFrequency === "semanal" ? "semanas" : "meses"}. Para acelerarlo, aumenta el aporte por periodo en el simulador de Planes de Ahorro.`;
   }
 
   if (q.includes("deuda") && includesAny(q, ["priorizar", "primero", "pagar"])) {

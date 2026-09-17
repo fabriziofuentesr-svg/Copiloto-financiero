@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { useFinanceDispatch, useFinanceState } from "../../context/FinanceContext.jsx";
 import { ACCOUNT_TYPES } from "../../data/mockData.js";
-import { Button, Field, Input, Select } from "../ui/primitives.jsx";
+import { Button, Field, Input, Select , MoneyInput } from "../ui/primitives.jsx";
 
 const EMPTY_ACCOUNT = { name: "", type: "efectivo", balance: "", creditLimit: "", statementDay: "", paymentDay: "", minimumPayment: "", rate: "" };
 
@@ -63,13 +63,13 @@ export function AccountForm({ account = null, onSuccess, submitLabel }) {
         </Select>
       </Field>
       <Field label={`${isCard ? "Saldo utilizado" : "Saldo actual"} (${state.profile.currency === "USD" ? "USD" : "Bs"})`}>
-        <Input type="number" min="0" step="0.01" value={form.balance} onChange={(event) => setForm((current) => ({ ...current, balance: event.target.value }))} required />
+        <MoneyInput currency={state.profile.currency} type="number" min="0" step="0.01" value={form.balance} onChange={(event) => setForm((current) => ({ ...current, balance: event.target.value }))} required />
       </Field>
       {isEditing ? <p className="text-xs text-ink-soft">Si cambias el saldo, se creará un ajuste visible en Movimientos para conservar el historial.</p> : null}
       {isCard ? (
         <div className="grid sm:grid-cols-2 gap-3 rounded border border-line p-3">
-          <Field label="Límite de crédito"><Input type="number" min="0" step="0.01" value={form.creditLimit} onChange={(event) => setForm((current) => ({ ...current, creditLimit: event.target.value }))} /></Field>
-          <Field label="Pago mínimo"><Input type="number" min="0" step="0.01" value={form.minimumPayment} onChange={(event) => setForm((current) => ({ ...current, minimumPayment: event.target.value }))} /></Field>
+          <Field label="Límite de crédito"><MoneyInput currency={state.profile.currency} type="number" min="0" step="0.01" value={form.creditLimit} onChange={(event) => setForm((current) => ({ ...current, creditLimit: event.target.value }))} /></Field>
+          <Field label="Pago mínimo"><MoneyInput currency={state.profile.currency} type="number" min="0" step="0.01" value={form.minimumPayment} onChange={(event) => setForm((current) => ({ ...current, minimumPayment: event.target.value }))} /></Field>
           <Field label="Día de corte"><Input type="number" min="1" max="31" value={form.statementDay} onChange={(event) => setForm((current) => ({ ...current, statementDay: event.target.value }))} /></Field>
           <Field label="Día de pago"><Input type="number" min="1" max="31" value={form.paymentDay} onChange={(event) => setForm((current) => ({ ...current, paymentDay: event.target.value }))} /></Field>
           <Field label="Tasa anual (%)"><Input type="number" min="0" max="300" step="0.01" value={form.rate} onChange={(event) => setForm((current) => ({ ...current, rate: event.target.value }))} /></Field>

@@ -1,3 +1,4 @@
+import { profileToday } from "./movementDates.js";
 import { localDateString } from "./format.js";
 
 export const NON_OPERATING_ORIGINS = new Set([
@@ -89,7 +90,7 @@ export function buildTransfer(payload, accounts, createId, createdAt = new Date(
 }
 
 export function getRealMovementProgress(state) {
-  const real = (state.transactions || []).filter(isRealUserTransaction);
+  const real = (state.transactions || []).filter(tx=>isRealUserTransaction(tx) && tx.date <= profileToday(state.profile));
   const hasIncome = real.some((transaction) => transaction.type === "ingreso");
   const hasExpense = real.some((transaction) => transaction.type === "gasto");
   return {

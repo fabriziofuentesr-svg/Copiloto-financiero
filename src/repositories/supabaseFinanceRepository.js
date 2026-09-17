@@ -1,6 +1,7 @@
 import { buildEmptyState } from "../data/mockData.js";
 import { migrateState } from "../services/migrations.js";
 import { RepositoryError } from "./contracts.js";
+import { validateMovementWrites } from "../services/financial/movementDates.js";
 import { compareFinanceStates } from "../services/import/localMigration.js";
 
 function operationId() {
@@ -27,7 +28,8 @@ export function createSupabaseFinanceRepository(client, userId) {
       planningSupported = Array.isArray(data?.state?.monthlyPlans) && Array.isArray(data?.state?.savingsAllocations);
       return migrateState(data?.state || buildEmptyState());
     },
-    async apply({ action, nextState }) {
+    async apply({ action, previousState, nextState }) {
+      validateMovementWrites(previousState, nextState);
       if (!planningSupported && (["SAVE_MONTHLY_PLAN","SAVE_CATEGORY","SAVINGS_OPERATION"].includes(action.type) || nextState.monthlyPlans?.length || nextState.savingsAllocations?.length || nextState.transactions?.some(tx=>tx.planItemId) || JSON.stringify(nextState.categories) !== JSON.stringify(buildEmptyState().categories))) throw new RepositoryError("migration_required", "La planificación todavía no está habilitada en tu cuenta. Tus cambios visibles se conservan; falta actualizar la base de datos.");
       const { data, error } = await client.rpc("apply_finance_state", {
         p_state: nextState,
@@ -52,6 +54,7 @@ export function createSupabaseFinanceRepository(client, userId) {
       return data || null;
     },
     async importLocal(localState, migrationId, fingerprint) {
+      validateMovementWrites(null, localState);
       if (!planningSupported) {
         const loaded=await client.rpc("get_finance_state");
         if(loaded.error) throw translate(loaded.error,"No pudimos verificar la importación.");

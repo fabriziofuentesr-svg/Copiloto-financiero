@@ -1,14 +1,15 @@
 import React, { useState } from "react";
 import { useFinanceDispatch, useFinanceState } from "../../context/FinanceContext.jsx";
 import { addMonths, localDateString, parseDate } from "../../services/financial/format.js";
-import { Button, Field, Input, Select } from "../ui/primitives.jsx";
+import { Button, Field, Input, Select , MoneyInput } from "../ui/primitives.jsx";
+import { profileToday } from "../../services/financial/movementDates.js";
 
 function buildInitialForm(state, type, transaction) {
   if (transaction) return {
     description: transaction.description || "", amount: String(transaction.amount || ""), date: localDateString(transaction.date),
     category: transaction.category || "", accountId: transaction.accountId || "", paymentMethod: transaction.paymentMethod || "", type: transaction.type,
   };
-  return { description: "", amount: "", date: localDateString(), category: state.categories.find((category) => category.type === type && !category.system && !category.archived)?.id || "", accountId: state.accounts.find(account=>account.type !== "tarjeta_credito")?.id || state.accounts[0]?.id || "", paymentMethod: state.paymentMethods[0]?.id || "", type };
+  return { description: "", amount: "", date: profileToday(state.profile), category: state.categories.find((category) => category.type === type && !category.system && !category.archived)?.id || "", accountId: state.accounts.find(account=>account.type !== "tarjeta_credito")?.id || state.accounts[0]?.id || "", paymentMethod: state.paymentMethods[0]?.id || "", type };
 }
 
 export function TransactionForm({ initialType = "gasto", lockType = false, transaction = null, prefill = {}, onSuccess, submitLabel }) {
@@ -66,8 +67,8 @@ export function TransactionForm({ initialType = "gasto", lockType = false, trans
       {form.type === "gasto" && fixedItems.length ? <Field label="Compromiso fijo que paga este movimiento"><Select value={form.planItemId ? `${form.planMonth}:${form.planItemId}` : ""} onChange={event=>linkCommitment(event.target.value)}><option value="">No vinculado a un compromiso</option>{fixedItems.map(item=><option key={`${item.month}:${item.id}`} value={`${item.month}:${item.id}`}>{item.month} · {item.name || item.categorySnapshot?.name}</option>)}</Select></Field> : null}
       {form.planItemId ? <div className="rounded bg-paper-raised p-3 text-sm"><p>Pago vinculado al compromiso de {form.planMonth}. Solo se descontará una vez.</p><label className="flex items-center gap-2 mt-2"><input type="checkbox" checked={Boolean(form.completesCommitment)} onChange={event=>setForm({...form,completesCommitment:event.target.checked})} />Este pago completa el compromiso, aunque el monto sea distinto del estimado</label></div> : null}
       <div className="grid sm:grid-cols-2 gap-3">
-        <Field label={`Monto (${state.profile.currency === "USD" ? "USD" : "Bs"})`}><Input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} required /></Field>
-        <Field label="Fecha"><Input type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} required /></Field>
+        <Field label={`Monto (${state.profile.currency === "USD" ? "USD" : "Bs"})`}><MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} required /></Field>
+        <Field label="Fecha"><Input type="date" max={profileToday(state.profile)} value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} required /></Field>
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Categoría"><Select value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>{availableCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</Select></Field>

@@ -8,7 +8,7 @@ export function goalProgress(goal) {
 // Dado un aporte mensual, calcula en cuántos meses se alcanza la meta y la
 // fecha estimada. Es la función que usa tanto la tarjeta de la meta como
 // el simulador ("¿qué pasa si ahorro Bs X al mes?").
-export function estimateGoalCompletion(goal, monthlyContribution = goal.monthlyContribution) {
+export function estimateGoalCompletion(goal, monthlyContribution = goal.monthlyContribution, now = new Date()) {
   const { restante } = goalProgress(goal);
   if (restante === 0) {
     return { months: 0, date: new Date() };
@@ -18,7 +18,14 @@ export function estimateGoalCompletion(goal, monthlyContribution = goal.monthlyC
     return { months: null, date: null };
   }
   const months = Math.ceil(restante / contribution);
-  const date = new Date();
-  date.setMonth(date.getMonth() + months);
-  return { months, date };
+  const frequency = goal.contributionFrequency || "mensual";
+  const date = new Date(now);
+  if (frequency === "semanal") date.setDate(date.getDate() + months * 7);
+  else {
+    const anchor = date.getDate();
+    date.setDate(1);
+    date.setMonth(date.getMonth() + months);
+    date.setDate(Math.min(anchor, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+  }
+  return { months: frequency === "mensual" ? months : null, periods: months, frequency, date };
 }

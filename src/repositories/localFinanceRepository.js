@@ -1,5 +1,6 @@
 import { loadState, saveState } from "../services/storage.js";
 import { migrateState } from "../services/migrations.js";
+import { validateMovementWrites } from "../services/financial/movementDates.js";
 
 export const LOCAL_STATE_KEY = "estado-financiero-v1";
 export const GUEST_STATE_KEY = "invitado-financiero-v1";
@@ -9,7 +10,8 @@ export function createLocalFinanceRepository(key = GUEST_STATE_KEY) {
     mode: "local",
     storageKey: key,
     async load() { return migrateState(loadState(key)); },
-    async apply({ nextState }) {
+    async apply({ previousState, nextState }) {
+      validateMovementWrites(previousState || loadState(key), nextState);
       const guestState = { ...nextState, localOwner: { type: "guest", version: 1 } };
       if (!saveState(key, guestState)) throw new Error("No se pudo guardar en este navegador.");
       return guestState;

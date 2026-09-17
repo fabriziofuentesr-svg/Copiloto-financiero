@@ -5,6 +5,8 @@ import { localDateString } from "./financial/format.js";
 import { categorySnapshot, saveMonthlyPlan } from "./financial/monthlyPlan.js";
 import { applySavingsOperation } from "./financial/savings.js";
 import { changeCategory } from "./categories.js";
+import { validateMovementDate, profileToday } from "./financial/movementDates.js";
+import { ensureStandardSavings, reassignSavings } from "./financial/standardSavings.js";
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
@@ -31,7 +33,7 @@ export function financeReducer(state, action) {
       return {...state,monthlyPlans:[...(state.monthlyPlans || []).filter(item=>item.month !== plan.month),plan]};
     }
     case "SAVE_CATEGORY": return changeCategory(state,action.payload);
-    case "SAVINGS_OPERATION": return applySavingsOperation(state,action.payload,uid);
+    case "SAVINGS_OPERATION": return action.payload.method === "reassign" ? reassignSavings(state,action.payload) : applySavingsOperation(state,action.payload,uid);
     case "LOAD_STATE":
       return action.payload;
 
@@ -72,7 +74,7 @@ export function financeReducer(state, action) {
     // Completa el onboarding: guarda el perfil ingresado y marca
     // onboardingCompleted en true. A partir de aquí la app entra directo.
     case "COMPLETE_ONBOARDING":
-      return { ...state, profile: { ...state.profile, ...action.payload, onboardingCompleted: true } };
+      return ensureStandardSavings({ ...state, profile: { ...state.profile, ...action.payload, onboardingCompleted: true } });
 
     // Edición posterior del perfil desde Configuración (no toca los datos
     // financieros, ni el flag de onboarding salvo que se lo pase explícito).
@@ -141,6 +143,7 @@ export function financeReducer(state, action) {
       };
 
     case "ADD_TRANSACTION": {
+      validateMovementDate(action.payload.date, state.profile);
       const amount = money(action.payload.amount);
       if (!Number.isFinite(amount) || amount <= 0) return state;
       if (!(state.accounts || []).some((account) => account.id === action.payload.accountId)) return state;
@@ -160,10 +163,11 @@ export function financeReducer(state, action) {
     }
 
     case "TRANSFER_BETWEEN_ACCOUNTS": {
+      validateMovementDate(action.payload.date || profileToday(state.profile), state.profile);
       const source=state.accounts.find(account=>account.id === action.payload.fromAccountId);
       const protectedAmount=(state.savingsAllocations || []).filter(item=>item.accountId === source?.id).reduce((total,item)=>total+item.amount,0);
       if (!source || !(Number(action.payload.amount)>0) || Number(action.payload.amount) > money(source.balance-protectedAmount)) throw new Error("La cuenta no tiene suficiente dinero libre. Libera los aportes protegidos antes de transferirlos.");
-      const transfer = buildTransfer(action.payload, state.accounts, uid, action.payload.createdAt || new Date());
+      const transfer = buildTransfer({...action.payload,date:action.payload.date || profileToday(state.profile)}, state.accounts, uid, action.payload.createdAt || new Date());
       if (!transfer) throw new Error("Selecciona dos cuentas diferentes y un monto válido.");
       return {
         ...state,
@@ -178,6 +182,7 @@ export function financeReducer(state, action) {
       const prev = state.transactions.find((t) => t.id === action.payload.id);
       if (!prev || prev.generated) return state;
       const next = { ...prev, ...action.payload, amount: money(action.payload.amount ?? prev.amount), linkedAccountId: action.payload.accountId ?? prev.accountId, categorySnapshot: prev.category === action.payload.category ? prev.categorySnapshot : categorySnapshot(state.categories.find(category=>category.id === action.payload.category)) };
+      validateMovementDate(next.date, state.profile);
       // Remote rows contain balanceDelta. Recompute it when editing an
       // operating amount instead of reusing the previous persisted delta.
       if (["ingreso","gasto"].includes(next.type)) next.balanceDelta=next.type === "ingreso" ? next.amount : -next.amount;
@@ -208,13 +213,14 @@ export function financeReducer(state, action) {
       const requestId = action.payload.requestId;
       if (requestId && (state.processedRequestIds || []).includes(requestId)) return state;
       const { account, openingTransaction } = buildAccountCreation(action.payload, uid, action.payload.createdAt || new Date());
+      if(openingTransaction) openingTransaction.date=profileToday(state.profile,new Date(action.payload.createdAt || Date.now()));
       if (!account.name || (state.accounts || []).some((item) => item.id === account.id)) return state;
-      return {
+      return ensureStandardSavings({
         ...state,
         accounts: [...state.accounts, account],
         transactions: openingTransaction ? [openingTransaction, ...state.transactions] : state.transactions,
         processedRequestIds: requestId ? [...(state.processedRequestIds || []).slice(-99), requestId] : state.processedRequestIds,
-      };
+      });
     }
 
     case "UPDATE_ACCOUNT":
@@ -278,13 +284,22 @@ export function financeReducer(state, action) {
       return { ...state, [collection]: (state[collection] || []).filter((item) => item.id !== action.payload.id) };
     }
 
-    case "ADD_GOAL":
-      return { ...state, goals: [...state.goals, { id: uid("goal"), ...action.payload, current: 0 }] };
+    case "ADD_GOAL": {
+      if (!action.payload.name?.trim() || !(Number(action.payload.target)>0) || !Number.isFinite(Number(action.payload.target)) || !Number.isFinite(Number(action.payload.monthlyContribution || 0)) || Number(action.payload.monthlyContribution || 0)<0 || !["mensual","semanal"].includes(action.payload.contributionFrequency || "mensual")) throw new Error("Revisa el nombre, los montos y la frecuencia del plan.");
+      return { ...state, goals: [...state.goals, { id: uid("goal"), contributionFrequency:"mensual", ...action.payload, current: 0 }] };
+    }
 
-    case "UPDATE_GOAL":
-      return { ...state, goals: state.goals.map((g) => (g.id === action.payload.id ? { ...g, ...action.payload, current:g.current } : g)) };
+    case "UPDATE_GOAL": {
+      const previous=state.goals.find(goal=>goal.id === action.payload.id);
+      if(!previous) return state;
+      if(previous.system === "standard_savings") throw new Error("Ahorros conserva el dinero existente; crea otro plan para un objetivo específico.");
+      const next={...previous,...action.payload,current:previous.current};
+      if(!next.name?.trim() || !(Number(next.target)>0) || !Number.isFinite(Number(next.target)) || Number(next.target)<Number(previous.current) || !Number.isFinite(Number(next.monthlyContribution || 0)) || Number(next.monthlyContribution || 0)<0 || !["mensual","semanal"].includes(next.contributionFrequency || "mensual")) throw new Error("Revisa el nombre, los montos y la frecuencia. El objetivo no puede ser menor al dinero ya asignado.");
+      return {...state,goals:state.goals.map(goal=>goal.id === next.id ? next : goal)};
+    }
 
     case "DELETE_GOAL": {
+      if(state.goals.find(goal=>goal.id === action.payload)?.system === "standard_savings") throw new Error("Ahorros es el plan general de tus ahorros existentes y no se elimina.");
       if ((state.savingsAllocations || []).some(item=>item.goalId === action.payload && item.amount > 0)) throw new Error("Libera primero los aportes vinculados al plan.");
       if ((state.monthlyPlans || []).some(plan=>plan.month >= localDateString().slice(0,7) && plan.savings.some(item=>item.goalId === action.payload && item.estimated>0))) throw new Error("Quita primero sus aportes previstos en Mi mes para no dejar compromisos sin plan.");
       return {...state,goals:state.goals.filter(goal=>goal.id !== action.payload)};

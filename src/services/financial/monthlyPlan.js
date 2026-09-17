@@ -1,3 +1,4 @@
+import { profileToday } from "./movementDates.js";
 import { localDateString, parseDate, daysBetweenInclusive } from "./format.js";
 import { isOperatingTransaction, getTransactionBalanceDelta } from "./ledger.js";
 
@@ -21,7 +22,6 @@ export function saveMonthlyPlan(state, draft, now = new Date()) {
   if (![draft.incomes,draft.expenses,draft.savings].every(Array.isArray)) throw new Error("El plan debe contener listas válidas de ingresos, gastos y aportes.");
   const previous = (state.monthlyPlans || []).find(plan => plan.month === draft.month);
   if (!validMonth(draft.month) || draft.month < monthKey(now)) throw new Error("Los meses pasados son de consulta. No puedes crear ni editar su plan.");
-  if (typeof draft.recordsComplete !== "boolean") throw new Error("Indica si tus registros incluyen todo el mes.");
   if (!["none","unknown","separate","savings"].includes(draft.emergency?.status)) throw new Error("Indica si tienes ahorros para imprevistos.");
   if (["separate","savings"].includes(draft.emergency.status)) {
     const validSource=draft.emergency.sourceType === "goal" ? state.goals.some(goal=>goal.id === draft.emergency.sourceId) : state.accounts.some(account=>account.id === draft.emergency.sourceId && account.type !== "tarjeta_credito");
@@ -70,6 +70,7 @@ function closedMonthCash(state,month) {
   }
   const allocations=new Map();
   for(const event of state.savingsContributions || []) {
+    if(event.method === "reassign") continue;
     if(!event.accountId || !event.linkedGoalId || monthKey(event.date)>month) continue;
     const key=`${event.accountId}:${event.linkedGoalId}`;
     allocations.set(key,{accountId:event.accountId,goalId:event.linkedGoalId,amount:money((allocations.get(key)?.amount || 0)+(event.method === "release" ? -event.amount : event.amount))});
@@ -78,7 +79,7 @@ function closedMonthCash(state,month) {
 }
 
 function expenseStatus(state, plan, item) {
-  const tx = (state.transactions || []).filter(tx=>tx.type === "gasto" && isOperatingTransaction(tx) && monthKey(tx.date) === plan.month && (item.classification === "fijo" ? (tx.planItemId === item.id && tx.planMonth === plan.month) || (!tx.planItemId && item.linkedObligationId && (tx.linkedDebtId === item.linkedObligationId || tx.linkedCreditCardId === item.linkedObligationId || state.debts.find(debt=>debt.id === tx.linkedDebtId)?.linkedAccountId === item.linkedObligationId)) : tx.category === item.categoryId && tx.categorySnapshot?.classification !== "fijo" && !tx.planItemId));
+  const tx = (state.transactions || []).filter(tx=>tx.type === "gasto" && isOperatingTransaction(tx) && monthKey(tx.date) === plan.month && (item.classification === "fijo" ? (tx.planItemId === item.id && tx.planMonth === plan.month) || (!tx.planItemId && !tx.linkedDebtId && !tx.linkedCreditCardId && tx.category === item.categoryId && plan.expenses.filter(other=>other.classification === "fijo" && other.categoryId === item.categoryId).length === 1) || (!tx.planItemId && item.linkedObligationId && (tx.linkedDebtId === item.linkedObligationId || tx.linkedCreditCardId === item.linkedObligationId || state.debts.find(debt=>debt.id === tx.linkedDebtId)?.linkedAccountId === item.linkedObligationId)) : tx.category === item.categoryId && tx.categorySnapshot?.classification !== "fijo" && !tx.planItemId));
   const actual = sum(tx.map(tx=>tx.amount));
   const completed = item.classification === "fijo" && (tx.some(tx=>tx.completesCommitment) || (actual>0 && actual>=item.estimated));
   const pending = completed ? 0 : Math.max(0,money(item.estimated-actual));
@@ -87,6 +88,9 @@ function expenseStatus(state, plan, item) {
 }
 
 export function monthlyPlanStatus(state, selectedMonth = monthKey(), now = new Date()) {
+  const today = profileToday(state.profile,now);
+  const future = (state.transactions || []).filter(tx=>tx.date > today);
+  state = {...state,accounts:state.accounts.map(account=>({...account,balance:money(account.balance-future.filter(tx=>tx.accountId === account.id).reduce((total,tx)=>total+getTransactionBalanceDelta(tx),0))})),transactions:(state.transactions || []).filter(tx=>tx.date <= today)};
   const plan = (state.monthlyPlans || []).find(plan=>plan.month === selectedMonth);
   let cash = spendingMoney(state);
   if (!plan) return {available:false,missing:["el Plan del mes"],confidence:"insuficiente",cash,month:selectedMonth};
@@ -100,7 +104,7 @@ export function monthlyPlanStatus(state, selectedMonth = monthKey(), now = new D
     const linked=(state.transactions || []).filter(tx=>tx.type === "gasto" && monthKey(tx.date)<=selectedMonth && tx.planMonth === old.month && tx.planItemId === item.id);
     return {...item,id:`${old.month}-${item.id}`,planMonth:old.month,pending:linked.some(tx=>tx.completesCommitment) ? 0 : Math.max(0,money(item.estimated-sum(linked.map(tx=>tx.amount))))};
   })).filter(item=>item.pending > 0);
-  const savings = plan.savings.map(item=>{const actual=sum((state.savingsContributions || []).filter(event=>event.method !== "reconcile" && event.linkedGoalId === item.goalId && monthKey(event.date) === selectedMonth).map(event=>event.method === "release" ? -event.amount : event.amount)); return {...item,actual,pending:Math.max(0,money(item.estimated-actual))};});
+  const savings = plan.savings.map(item=>{const actual=sum((state.savingsContributions || []).filter(event=>!["reconcile","reassign"].includes(event.method) && event.linkedGoalId === item.goalId && monthKey(event.date) === selectedMonth).map(event=>event.method === "release" ? -event.amount : event.amount)); return {...item,actual,pending:Math.max(0,money(item.estimated-actual))};});
   const cards=(state.accounts || []).filter(account=>account.type === "tarjeta_credito" && money(account.balance) < 0);
   const cardsIds=new Set(cards.map(card=>card.id));
   const obligations=[...cards.map(card=>({id:card.id,name:card.name,amount:card.minimumPayment})), ...(state.debts || []).filter(debt=>money(debt.balance)>0 && !cardsIds.has(debt.linkedAccountId) && !cards.some(card=>card.name.toLowerCase() === debt.name.toLowerCase())).map(debt=>({id:debt.id,name:debt.name,amount:debt.installment}))];

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useFinanceDispatch, useFinanceState } from "../../context/FinanceContext.jsx";
-import { Button, Field, Input, Select } from "../ui/primitives.jsx";
+import { Button, Field, Input, Select , MoneyInput } from "../ui/primitives.jsx";
 import { fmtBs } from "../../services/financial/format.js";
 import { getTotalDebtInstallments } from "../../services/financial/calculations.js";
 import { getFinancialDataReadiness } from "../../services/financial/readiness.js";
@@ -51,7 +51,7 @@ export function FinancialHealthSetupForm({ onSuccess }) {
         </p>
       ) : (
         <Field label="Ingreso mensual aproximado">
-          <Input type="number" min="0.01" step="0.01" value={income} onChange={(event) => setIncome(event.target.value)} required />
+          <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={income} onChange={(event) => setIncome(event.target.value)} required />
         </Field>
       )}
 
@@ -75,7 +75,7 @@ export function FinancialHealthSetupForm({ onSuccess }) {
           </Select>
         </Field>
         <Field label={savingsType === "percentage" ? "Objetivo de ahorro (%)" : "Objetivo de ahorro mensual"}>
-          <Input type="number" min="0.01" step="0.01" value={savingsValue} onChange={(event) => setSavingsValue(event.target.value)} required />
+          {savingsType === "percentage" ? <Input type="number" min="0.01" step="0.01" value={savingsValue} onChange={event=>setSavingsValue(event.target.value)} required /> : <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={savingsValue} onChange={event=>setSavingsValue(event.target.value)} required />}
         </Field>
       </div>
 
@@ -129,10 +129,10 @@ export function ProjectionSetupForm({ onSuccess }) {
     <form onSubmit={submit} className="flex flex-col gap-4">
       <p className="text-sm text-ink-soft">Usaremos automáticamente tus saldos, gastos recurrentes y pagos de deuda ya registrados.</p>
       <Field label="Ingresos mensuales esperados">
-        <Input type="number" min="0.01" step="0.01" value={expectedIncome} onChange={(event) => setExpectedIncome(event.target.value)} required />
+        <MoneyInput currency={state.profile.currency} type="number" min="0.01" step="0.01" value={expectedIncome} onChange={(event) => setExpectedIncome(event.target.value)} required />
       </Field>
       <Field label="Gastos variables esperados por mes">
-        <Input type="number" min="0" step="0.01" value={variableExpenses} onChange={(event) => setVariableExpenses(event.target.value)} required />
+        <MoneyInput currency={state.profile.currency} type="number" min="0" step="0.01" value={variableExpenses} onChange={(event) => setVariableExpenses(event.target.value)} required />
       </Field>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Próxima fecha de cobro">
