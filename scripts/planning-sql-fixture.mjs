@@ -16,6 +16,8 @@ state=reduce(state,{type:'SAVINGS_OPERATION',payload:{goalId:'trip',accountId:'c
 const rent=state.transactions.find(tx=>tx.description==='Alquiler');
 const edited=reduce(state,{type:'UPDATE_TRANSACTION',payload:{id:rent.id,amount:900,category:'vivienda'}});
 const removed=reduce(edited,{type:'DELETE_TRANSACTION',payload:rent.id});
+const funded=reduce(removed,{type:'ADD_TRANSACTION',payload:{id:'funded-expense',description:'Equipaje',type:'gasto',category:'otros_gastos',amount:400,accountId:'cash',date:localDateString(),savingsFunding:{goalId:'trip',accountId:'cash',amount:400,goalName:'Viaje'}}});
+const refunded=reduce(funded,{type:'DELETE_TRANSACTION',payload:'funded-expense'});
 const json=value=>`$fixture$${JSON.stringify(value)}$fixture$::jsonb`;
 console.log(`begin;
 select set_config('copiloto.test_user',gen_random_uuid()::text,true);
@@ -42,6 +44,22 @@ begin
  r:=public.apply_finance_state(${json(removed)},2,'planning-delete');
  select (x->>'balance')::numeric into value from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='cash';
  if value<>2350 then raise exception 'delete mismatch: %',value; end if;
+ r:=public.apply_finance_state(${json(funded)},3,'funded-spend');
+ if not exists(select 1 from jsonb_array_elements(r#>'{state,savingsAllocations}') x where (x->>'amount')::numeric=100) then raise exception 'funding allocation mismatch'; end if;
+ if not exists(select 1 from jsonb_array_elements(r#>'{state,transactions}') x where x#>>'{savingsFunding,goalId}'='trip') then raise exception 'funding metadata lost'; end if;
+ r:=public.apply_finance_state(${json(refunded)},4,'funded-delete');
+ if not exists(select 1 from jsonb_array_elements(r#>'{state,savingsAllocations}') x where (x->>'amount')::numeric=500) then raise exception 'funding reversal mismatch'; end if;
+ begin
+  perform public.apply_finance_state(${json(funded)},3,'stale-funding');
+  raise exception 'stale revision accepted';
+ exception when serialization_failure then null; end;
+ begin
+  s:=${json(refunded)};
+  s:=jsonb_set(s,'{savingsAllocations,0,amount}','99999'::jsonb);
+  perform public.apply_finance_state(s,5,'invalid-reserve');
+  raise exception 'overbacked reserve accepted';
+ exception when check_violation then null; end;
+ if (public.get_finance_state()->>'revision')::int<>5 then raise exception 'failed operation partially committed'; end if;
  if not exists(select 1 from jsonb_array_elements(r#>'{state,accounts}') x where x->>'id'='card' and (x->>'balance')::numeric=-450) then raise exception 'card reconciliation drift'; end if;
 end $verify$;
 select set_config('request.jwt.claims',jsonb_build_object('sub',current_setting('copiloto.test_other'),'role','authenticated')::text,true);

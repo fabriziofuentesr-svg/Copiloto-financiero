@@ -25,7 +25,7 @@ export function validateMovementWrites(previousState, nextState, now) {
   const previous = new Map((previousState?.transactions || []).map(tx => [tx.id, tx]));
   for (const tx of nextState.transactions || []) {
     const old = previous.get(tx.id);
-    if (!old || ["date", "amount", "type", "accountId"].some(key => old[key] !== tx[key])) {
+    if (!old || ["date", "amount", "type", "accountId"].some(key => old[key] !== tx[key]) || JSON.stringify(old.savingsFunding || null)!==JSON.stringify(tx.savingsFunding || null)) {
       validateMovementDate(tx.date, nextState.profile, now);
     }
   }

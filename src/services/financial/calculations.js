@@ -125,7 +125,7 @@ export function getCategoryTrends(state, referenceDate = new Date()) {
 }
 
 export function getSavingsRealized(state, start = startOfMonth(new Date()), end = new Date()) {
-  return amount((state.savingsContributions || []).filter((item) => !["reconcile","reassign"].includes(item.method) && inPeriod(item.date, start, end)).reduce((sum, item) => sum + (item.method === "release" ? -1 : 1) * amount(item.amount), 0));
+  return amount((state.savingsContributions || []).filter((item) => !["reconcile","reassign","move","initial_protection"].includes(item.method) && inPeriod(item.date, start, end)).reduce((sum, item) => sum + (item.method === "release" ? -1 : 1) * amount(item.amount), 0));
 }
 
 export function getTotalBalance(state) {

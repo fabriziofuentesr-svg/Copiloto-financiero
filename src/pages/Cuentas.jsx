@@ -35,7 +35,7 @@ export default function Cuentas() {
         <Card><div className="text-ink-soft text-xs">Saldo utilizado en tarjetas</div><div className="font-display text-2xl font-semibold text-brick">{fmtBs(getCreditCardDebt(state), state.profile.currency)}</div></Card>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {state.accounts.map((account) => <AccountCard key={account.id} account={account} currency={state.profile.currency} onEdit={() => setEditing(account)} onDelete={() => deleteAccount(account)} />)}
+        {state.accounts.map((account) => <AccountCard key={account.id} account={account} reserved={(state.savingsAllocations || []).filter(row=>row.accountId===account.id).reduce((sum,row)=>sum+Number(row.amount),0)} currency={state.profile.currency} onEdit={() => setEditing(account)} onDelete={() => deleteAccount(account)} />)}
         {!state.accounts.length ? <p className="text-ink-soft text-sm">Añade una cuenta para registrar saldos y movimientos.</p> : null}
       </div>
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nueva cuenta"><AccountForm onSuccess={() => setModalOpen(false)} /></Modal>

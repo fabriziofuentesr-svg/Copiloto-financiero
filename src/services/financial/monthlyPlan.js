@@ -27,7 +27,7 @@ export function saveMonthlyPlan(state, draft, now = new Date()) {
     const validSource=draft.emergency.sourceType === "goal" ? state.goals.some(goal=>goal.id === draft.emergency.sourceId) : state.accounts.some(account=>account.id === draft.emergency.sourceId && account.type !== "tarjeta_credito");
     if (!validSource || !Number.isFinite(Number(draft.emergency.amount)) || Number(draft.emergency.amount)<0) throw new Error("Selecciona el origen y un monto válido para tus ahorros.");
   }
-  if (draft.savings.some(item=>!state.goals.some(goal=>goal.id === item.goalId)) || new Set(draft.savings.map(item=>item.goalId)).size !== draft.savings.length) throw new Error("Selecciona planes de ahorro válidos, sin duplicarlos.");
+  if (draft.savings.some(item=>!state.goals.some(goal=>goal.id === item.goalId && (!goal.archived || Number(item.estimated)===0))) || new Set(draft.savings.map(item=>item.goalId)).size !== draft.savings.length) throw new Error("Selecciona planes de ahorro válidos, sin duplicarlos.");
   const linked=draft.expenses.map(item=>item.linkedObligationId).filter(Boolean);
   if (new Set(linked).size !== linked.length) throw new Error("Vincula cada cuota a un solo compromiso para evitar duplicarla.");
   if (![draft.closingTarget, ...draft.incomes.map(item => item.estimated), ...draft.expenses.map(item => item.estimated), ...draft.savings.map(item => item.estimated)].every(value => value !== "" && Number.isFinite(Number(value)) && Number(value) >= 0)) throw new Error("Ingresa montos válidos mayores o iguales a cero.");
@@ -44,12 +44,12 @@ export function saveMonthlyPlan(state, draft, now = new Date()) {
 }
 
 // Account balances are the ledger truth. Allocations identify existing money;
-// they never create assets. Savings accounts and their allocations are excluded once.
+// they never create assets. Only explicit allocations are protected, regardless of the account type.
 export function spendingMoney(state) {
   const assets = (state.accounts || []).filter(account=>account.type !== "tarjeta_credito");
-  const savings = sum(assets.filter(account=>account.type === "ahorro").map(account=>account.balance));
+  const savings = sum(assets.filter(account=>account.type === "ahorro").map(account=>sum((state.savingsAllocations || []).filter(item=>item.accountId === account.id).map(item=>item.amount))));
   const total = sum(assets.map(account=>account.balance));
-  const protectedMoney = sum(assets.filter(account=>account.type !== "ahorro").map(account=>Math.min(Math.max(0,money(account.balance)), sum((state.savingsAllocations || []).filter(item=>item.accountId === account.id).map(item=>item.amount)))));
+  const protectedMoney = sum(assets.filter(account=>account.type !== "ahorro").map(account=>sum((state.savingsAllocations || []).filter(item=>item.accountId === account.id).map(item=>item.amount))));
   return { total, savings, protectedMoney, spendable:money(total-savings-protectedMoney) };
 }
 
@@ -69,22 +69,54 @@ function closedMonthCash(state,month) {
     accounts.push({...account,balance:sum(tx.filter(item=>monthKey(item.date)<=month).map(getTransactionBalanceDelta))});
   }
   const allocations=new Map();
-  for(const event of state.savingsContributions || []) {
-    if(event.method === "reassign") continue;
-    if(!event.accountId || !event.linkedGoalId || monthKey(event.date)>month) continue;
-    const key=`${event.accountId}:${event.linkedGoalId}`;
-    allocations.set(key,{accountId:event.accountId,goalId:event.linkedGoalId,amount:money((allocations.get(key)?.amount || 0)+(event.method === "release" ? -event.amount : event.amount))});
-  }
+  const change=(accountId,goalId,delta)=>{
+    if(!accountId || !goalId) return;
+    const key=`${accountId}:${goalId}`;
+    allocations.set(key,{accountId,goalId,amount:money((allocations.get(key)?.amount || 0)+delta)});
+  };
+  const reconstruct=cutoff=>{
+    allocations.clear();
+    for(const event of state.savingsContributions || []) {
+      if(monthKey(event.date)>cutoff) continue;
+      change(event.accountId,event.linkedGoalId,event.method==="release" ? -money(event.amount) : money(event.amount));
+      if(event.method==="reassign") change(event.accountId,event.sourceGoalId,-money(event.amount));
+      if(event.method==="move") change(event.sourceAccountId,event.linkedGoalId,-money(event.amount));
+    }
+    for(const tx of state.transactions || []) if(tx.type==="gasto" && tx.savingsFunding && monthKey(tx.date)<=cutoff) change(tx.accountId,tx.savingsFunding.goalId,-money(tx.savingsFunding.amount));
+  };
+  reconstruct("9999-12");
+  const saved=new Map((state.savingsAllocations || []).map(row=>[`${row.accountId}:${row.goalId}`,money(row.amount)]));
+  if([...new Set([...saved.keys(),...allocations.keys()])].some(key=>money(saved.get(key))!==money(allocations.get(key)?.amount))) return null;
+  reconstruct(month);
   return spendingMoney({...state,accounts,savingsAllocations:[...allocations.values()].filter(item=>item.amount>0)});
 }
 
-function expenseStatus(state, plan, item) {
-  const tx = (state.transactions || []).filter(tx=>tx.type === "gasto" && isOperatingTransaction(tx) && monthKey(tx.date) === plan.month && (item.classification === "fijo" ? (tx.planItemId === item.id && tx.planMonth === plan.month) || (!tx.planItemId && !tx.linkedDebtId && !tx.linkedCreditCardId && tx.category === item.categoryId && plan.expenses.filter(other=>other.classification === "fijo" && other.categoryId === item.categoryId).length === 1) || (!tx.planItemId && item.linkedObligationId && (tx.linkedDebtId === item.linkedObligationId || tx.linkedCreditCardId === item.linkedObligationId || state.debts.find(debt=>debt.id === tx.linkedDebtId)?.linkedAccountId === item.linkedObligationId)) : tx.category === item.categoryId && tx.categorySnapshot?.classification !== "fijo" && !tx.planItemId));
-  const actual = sum(tx.map(tx=>tx.amount));
-  const completed = item.classification === "fijo" && (tx.some(tx=>tx.completesCommitment) || (actual>0 && actual>=item.estimated));
-  const pending = completed ? 0 : Math.max(0,money(item.estimated-actual));
-  const used = item.estimated > 0 ? actual/item.estimated : actual > 0 ? Infinity : 0;
-  return {...item,actual,pending,completed,difference:money(actual-item.estimated),remaining:Math.max(0,money(item.estimated-actual)),used,alert:item.classification === "variable" ? actual > item.estimated ? "superado" : actual === item.estimated && actual > 0 ? "alcanzado" : used >= .85 ? "cerca" : null : null};
+function expenseStatuses(state, plan) {
+  const movements=(state.transactions || []).filter(tx=>tx.type==="gasto" && isOperatingTransaction(tx) && monthKey(tx.date)===plan.month);
+  const allocations=new Map((state.savingsAllocations || []).map(row=>[`${row.goalId}:${row.accountId}`,money(row.amount)]));
+  const rows=plan.expenses.map(item=>{
+    const linked=movements.filter(tx=>tx.category===item.categoryId && (tx.planItemId===item.id && tx.planMonth===plan.month || (!tx.planItemId && item.linkedObligationId && (tx.linkedDebtId===item.linkedObligationId || tx.linkedCreditCardId===item.linkedObligationId))));
+    return {...item,actual:sum(linked.map(tx=>tx.amount)),completed:item.classification==="fijo" && linked.some(tx=>tx.completesCommitment)};
+  });
+  for(const categoryId of new Set(rows.map(row=>row.categoryId))) {
+    const categorized=movements.filter(tx=>tx.category===categoryId && !rows.some(row=>tx.planItemId===row.id && tx.planMonth===plan.month || (!tx.planItemId && row.linkedObligationId && (tx.linkedDebtId===row.linkedObligationId || tx.linkedCreditCardId===row.linkedObligationId))));
+    let pool=sum(categorized.map(tx=>tx.amount));
+    const categoryRows=rows.filter(row=>row.categoryId===categoryId);
+    for(const [index,row] of categoryRows.entries()) {
+      const assigned=index===categoryRows.length-1 ? pool : Math.min(pool,Math.max(0,money(row.estimated-row.actual)));
+      row.actual=money(row.actual+assigned);pool=money(pool-assigned);
+    }
+  }
+  return rows.map(item=>{
+    const completed=item.completed || (item.classification==="fijo" && item.actual>=item.estimated && item.actual>0);
+    const pending=completed ? 0 : Math.max(0,money(item.estimated-item.actual));
+    const used=item.estimated>0 ? item.actual/item.estimated : item.actual>0 ? Infinity : 0;
+    const key=`${item.fundingGoalId}:${item.fundingAccountId}`;
+    const consumed=sum(movements.filter(tx=>tx.category===item.categoryId && tx.savingsFunding && tx.savingsFunding.goalId===item.fundingGoalId && tx.accountId===item.fundingAccountId).map(tx=>tx.savingsFunding.amount));
+    const protectedPending=Math.min(pending,Math.max(0,money(item.fundingAmount-consumed)),allocations.get(key)||0);
+    allocations.set(key,money((allocations.get(key)||0)-protectedPending));
+    return {...item,pending,freePending:money(pending-protectedPending),protectedPending,completed,remaining:pending,difference:money(item.actual-item.estimated),used,alert:item.actual>item.estimated ? "superado" : item.classification==="variable" ? item.actual===item.estimated && item.actual>0 ? "alcanzado" : used>=.85 ? "cerca" : null : null};
+  });
 }
 
 export function monthlyPlanStatus(state, selectedMonth = monthKey(), now = new Date()) {
@@ -99,24 +131,24 @@ export function monthlyPlanStatus(state, selectedMonth = monthKey(), now = new D
   if(historicalCash) cash=historicalCash;
   const tx = (state.transactions || []).filter(tx=>isOperatingTransaction(tx) && monthKey(tx.date) === selectedMonth);
   const incomes = plan.incomes.map(item=>{const actual=sum(tx.filter(tx=>tx.type === "ingreso" && tx.category === item.categoryId).map(tx=>tx.amount)); return {...item,actual,pending:Math.max(0,money(item.estimated-actual)),difference:money(actual-item.estimated)};});
-  const expenses = plan.expenses.map(item=>expenseStatus(state,plan,item));
+  const expenses = expenseStatuses(state,plan);
   const overdue = (state.monthlyPlans || []).filter(old=>old.month < selectedMonth).flatMap(old=>old.expenses.filter(item=>item.classification === "fijo").map(item=>{
     const linked=(state.transactions || []).filter(tx=>tx.type === "gasto" && monthKey(tx.date)<=selectedMonth && tx.planMonth === old.month && tx.planItemId === item.id);
     return {...item,id:`${old.month}-${item.id}`,planMonth:old.month,pending:linked.some(tx=>tx.completesCommitment) ? 0 : Math.max(0,money(item.estimated-sum(linked.map(tx=>tx.amount))))};
   })).filter(item=>item.pending > 0);
-  const savings = plan.savings.map(item=>{const actual=sum((state.savingsContributions || []).filter(event=>!["reconcile","reassign"].includes(event.method) && event.linkedGoalId === item.goalId && monthKey(event.date) === selectedMonth).map(event=>event.method === "release" ? -event.amount : event.amount)); return {...item,actual,pending:Math.max(0,money(item.estimated-actual))};});
+  const savings = plan.savings.map(item=>{const actual=sum((state.savingsContributions || []).filter(event=>!["reconcile","reassign","move","initial_protection"].includes(event.method) && event.linkedGoalId === item.goalId && (event.planMonth ? event.planMonth === selectedMonth : monthKey(event.date) === selectedMonth)).map(event=>event.method === "release" ? -event.amount : event.amount)); return {...item,actual,pending:Math.max(0,money(item.estimated-actual))};});
   const cards=(state.accounts || []).filter(account=>account.type === "tarjeta_credito" && money(account.balance) < 0);
   const cardsIds=new Set(cards.map(card=>card.id));
   const obligations=[...cards.map(card=>({id:card.id,name:card.name,amount:card.minimumPayment})), ...(state.debts || []).filter(debt=>money(debt.balance)>0 && !cardsIds.has(debt.linkedAccountId) && !cards.some(card=>card.name.toLowerCase() === debt.name.toLowerCase())).map(debt=>({id:debt.id,name:debt.name,amount:debt.installment}))];
   const debtPending=sum(obligations.filter(debt=>!plan.expenses.some(item=>item.linkedObligationId === debt.id)).map(debt=>Math.max(0,money(debt.amount)-sum(tx.filter(tx=>tx.linkedDebtId === debt.id || tx.linkedCreditCardId === debt.id || state.debts.find(item=>item.id === tx.linkedDebtId)?.linkedAccountId === debt.id).map(tx=>tx.amount)))));
   const incomePending=sum(incomes.map(item=>item.pending));
-  const fixedPending=sum(expenses.filter(item=>item.classification === "fijo").map(item=>item.pending));
-  const variablePending=sum(expenses.filter(item=>item.classification === "variable").map(item=>item.pending));
+  const fixedPending=sum(expenses.filter(item=>item.classification === "fijo").map(item=>item.freePending));
+  const variablePending=sum(expenses.filter(item=>item.classification === "variable").map(item=>item.freePending));
   const savingsPending=sum(savings.map(item=>item.pending));
   const overduePending=sum(overdue.map(item=>item.pending));
   const issues=[];
   if (!plan.recordsComplete) issues.push("faltan movimientos desde el inicio del mes");
-  if (tx.some(movement=>movement.type === "gasto" && !movement.planItemId && !movement.linkedDebtId && !movement.linkedCreditCardId && plan.expenses.some(item=>item.classification === "fijo" && item.categoryId === movement.category))) issues.push("hay gastos de categorías fijas sin vínculo: edita esos movimientos para asociar cada pago a su compromiso y evitar pendientes duplicados");
+  if(expenses.some(item=>item.fundingAmount>0 && item.protectedPending<Math.min(item.pending,item.fundingAmount))) issues.push("revisa el respaldo de los gastos previstos con ahorros: la parte no cubierta se descontará del dinero libre");
   if (selectedMonth > currentMonth) issues.push("el disponible de apertura se actualizará cuando termine el mes anterior");
   if (obligations.some(debt=>debt.amount === null || debt.amount === undefined)) issues.push("faltan montos de cuotas o pagos mínimos");
   if (expenses.some(item=>item.alert === "superado")) issues.push("hay límites superados: revisa si quedan gastos adicionales");

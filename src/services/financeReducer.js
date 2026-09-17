@@ -7,6 +7,7 @@ import { applySavingsOperation } from "./financial/savings.js";
 import { changeCategory } from "./categories.js";
 import { validateMovementDate, profileToday } from "./financial/movementDates.js";
 import { ensureStandardSavings, reassignSavings } from "./financial/standardSavings.js";
+import { applyExpenseFunding, reservedInAccount, goalUsed } from "./financial/savingsFunding.js";
 function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
@@ -31,6 +32,24 @@ export function financeReducer(state, action) {
     case "SAVE_MONTHLY_PLAN": {
       const plan=saveMonthlyPlan(state,action.payload);
       return {...state,monthlyPlans:[...(state.monthlyPlans || []).filter(item=>item.month !== plan.month),plan]};
+    }
+    case "SAVE_INITIAL_SAVINGS": {
+      if(state.goals.some(goal=>goal.system==="standard_savings" && goal.initialSavingsConfirmed)) return state;
+      const initialized=ensureStandardSavings(state);
+      const goal=initialized.goals.find(row=>row.system === "standard_savings");
+      let next=initialized;
+      for(const row of action.payload.allocations || []) {
+        const amount=money(row.amount);
+        if(!Number.isFinite(Number(row.amount)) || amount<0) throw new Error("Indica montos de ahorro válidos.");
+        if(amount>0) next=applySavingsOperation(next,{goalId:goal.id,accountId:row.accountId,amount,method:"protect"},uid);
+      }
+      return {...next,goals:next.goals.map(row=>row.id===goal.id ? {...row,initialSavingsConfirmed:true} : row),profile:{...next.profile,initialSavingsConfirmed:true},savingsContributions:next.savingsContributions.map(event=>initialized.savingsContributions.some(old=>old.id===event.id) ? event : {...event,method:"initial_protection"})};
+    }
+    case "ARCHIVE_GOAL": {
+      const goal=state.goals.find(row=>row.id===action.payload);
+      if(!goal || goal.system==="standard_savings") throw new Error("Ahorros permanece disponible.");
+      if(state.savingsAllocations.some(row=>row.goalId===goal.id && row.amount>0)) throw new Error("Libera o reasigna el dinero apartado antes de archivar.");
+      return {...state,goals:state.goals.map(row=>row.id===goal.id ? {...row,archived:true,monthlyContribution:0} : row),monthlyPlans:state.monthlyPlans.map(plan=>plan.month>=profileToday(state.profile).slice(0,7) ? {...plan,savings:plan.savings.map(row=>row.goalId===goal.id ? {...row,estimated:0,cancelled:true} : row)} : plan)};
     }
     case "SAVE_CATEGORY": return changeCategory(state,action.payload);
     case "SAVINGS_OPERATION": return action.payload.method === "reassign" ? reassignSavings(state,action.payload) : applySavingsOperation(state,action.payload,uid);
@@ -143,17 +162,19 @@ export function financeReducer(state, action) {
       };
 
     case "ADD_TRANSACTION": {
+      if(action.payload.requestId && state.processedRequestIds.includes(action.payload.requestId)) return state;
       validateMovementDate(action.payload.date, state.profile);
       const amount = money(action.payload.amount);
       if (!Number.isFinite(amount) || amount <= 0) return state;
       if (!(state.accounts || []).some((account) => account.id === action.payload.accountId)) return state;
       const tx = { id: uid("tx"), origin: "user", generated: false, ...action.payload, amount, linkedAccountId: action.payload.accountId, categorySnapshot: categorySnapshot(state.categories.find(category=>category.id === action.payload.category)) };
       if(tx.linkedDebtId && !tx.linkedCreditCardId) tx.linkedCreditCardId=state.debts.find(debt=>debt.id === tx.linkedDebtId)?.linkedAccountId || null;
-      const accounts = (state.accounts || []).map((a) => {
+      const funded = applyExpenseFunding(state, tx);
+      const accounts = (funded.accounts || []).map((a) => {
         if (a.id !== tx.accountId) return a;
         return { ...a, balance: money((Number(a.balance) || 0) + getTransactionBalanceDelta(tx)) };
       });
-      return linkedPayment({ ...state, transactions: [tx, ...(state.transactions || [])], accounts },tx,1);
+      return linkedPayment({ ...funded, transactions: [tx, ...(state.transactions || [])], accounts,processedRequestIds:tx.requestId ? [...state.processedRequestIds,tx.requestId] : state.processedRequestIds },tx,1);
     }
 
     case "ADD_TRANSACTION_WITH_RECURRENCE": {
@@ -163,6 +184,7 @@ export function financeReducer(state, action) {
     }
 
     case "TRANSFER_BETWEEN_ACCOUNTS": {
+      if(action.payload.requestId && state.processedRequestIds.includes(action.payload.requestId)) return state;
       validateMovementDate(action.payload.date || profileToday(state.profile), state.profile);
       const source=state.accounts.find(account=>account.id === action.payload.fromAccountId);
       const protectedAmount=(state.savingsAllocations || []).filter(item=>item.accountId === source?.id).reduce((total,item)=>total+item.amount,0);
@@ -175,6 +197,7 @@ export function financeReducer(state, action) {
           ? { ...account, balance: money(account.balance - transfer.amount) }
           : account.id === transfer.destination.id ? { ...account, balance: money(account.balance + transfer.amount) } : account),
         transactions: [transfer.incoming, transfer.outgoing, ...state.transactions],
+        processedRequestIds:action.payload.requestId ? [...state.processedRequestIds,action.payload.requestId] : state.processedRequestIds,
       };
     }
 
@@ -187,25 +210,28 @@ export function financeReducer(state, action) {
       // operating amount instead of reusing the previous persisted delta.
       if (["ingreso","gasto"].includes(next.type)) next.balanceDelta=next.type === "ingreso" ? next.amount : -next.amount;
       if (!(next.amount > 0) || !(state.accounts || []).some((account) => account.id === next.accountId)) return state;
-      const reversed=linkedPayment(state,prev,-1);
-      let accounts = reversed.accounts;
+      const restored=applyExpenseFunding(state,prev,-1);
+      const reversed=linkedPayment(restored,prev,-1);
+      const restoredAccounts=reversed.accounts.map(a=>a.id === prev.accountId ? {...a,balance:money(a.balance-getTransactionBalanceDelta(prev))} : a);
+      const funded=applyExpenseFunding({...reversed,accounts:restoredAccounts},next);
+      let accounts = funded.accounts;
       accounts = accounts.map((a) => {
         let balance = Number(a.balance) || 0;
-        if (a.id === prev.accountId) balance -= getTransactionBalanceDelta(prev);
         if (a.id === next.accountId) balance += getTransactionBalanceDelta(next);
         return { ...a, balance: money(balance) };
       });
-      return linkedPayment({ ...reversed,transactions:state.transactions.map(t=>t.id === next.id ? next : t),accounts },next,1);
+      return linkedPayment({ ...funded,transactions:state.transactions.map(t=>t.id === next.id ? next : t),accounts },next,1);
     }
 
     case "DELETE_TRANSACTION": {
       const tx = state.transactions.find((t) => t.id === action.payload);
       if (!tx || tx.generated) return state;
-      const accounts = state.accounts.map((a) => {
+      const restored=applyExpenseFunding(state,tx,-1);
+      const accounts = restored.accounts.map((a) => {
         if (a.id !== tx.accountId) return a;
         return { ...a, balance: money(a.balance - getTransactionBalanceDelta(tx)) };
       });
-      return linkedPayment({ ...state, transactions: state.transactions.filter((t) => t.id !== action.payload), accounts },tx,-1);
+      return linkedPayment({ ...restored, transactions: state.transactions.filter((t) => t.id !== action.payload), accounts },tx,-1);
     }
 
     case "CREATE_ACCOUNT":
@@ -223,8 +249,13 @@ export function financeReducer(state, action) {
       });
     }
 
+    case "UPDATE_ACCOUNT_AND_BALANCE": {
+      const updated=financeReducer(state,{type:"UPDATE_ACCOUNT_METADATA",payload:action.payload});
+      return financeReducer(updated,{type:"ADJUST_ACCOUNT_BALANCE",payload:action.payload});
+    }
     case "UPDATE_ACCOUNT":
     case "UPDATE_ACCOUNT_METADATA":
+      if(action.payload.type==="tarjeta_credito" && ((state.savingsAllocations || []).some(row=>row.accountId===action.payload.id && row.amount>0) || state.transactions.some(tx=>tx.accountId===action.payload.id && tx.savingsFunding?.amount>0))) throw new Error("Esta cuenta guarda o ha pagado ahorros. Conserva su historial y crea una tarjeta por separado.");
       return { ...state, accounts: state.accounts.map((a) => (a.id === action.payload.id ? { ...a, ...action.payload, balance: a.balance } : a)) };
 
     case "ADJUST_ACCOUNT_BALANCE": {
@@ -232,6 +263,7 @@ export function financeReducer(state, action) {
       if (!account) return state;
       const requested = Math.max(0, money(action.payload.balance));
       const nextBalance = account.type === "tarjeta_credito" ? -requested : requested;
+      if(account.type !== "tarjeta_credito" && nextBalance < reservedInAccount(state,account.id)) throw new Error("Libera o reasigna el dinero apartado antes de reducir el saldo.");
       const delta = money(nextBalance - (Number(account.balance) || 0));
       if (delta === 0) return state;
       const adjustment = {
@@ -294,11 +326,12 @@ export function financeReducer(state, action) {
       if(!previous) return state;
       if(previous.system === "standard_savings") throw new Error("Ahorros conserva el dinero existente; crea otro plan para un objetivo específico.");
       const next={...previous,...action.payload,current:previous.current};
-      if(!next.name?.trim() || !(Number(next.target)>0) || !Number.isFinite(Number(next.target)) || Number(next.target)<Number(previous.current) || !Number.isFinite(Number(next.monthlyContribution || 0)) || Number(next.monthlyContribution || 0)<0 || !["mensual","semanal"].includes(next.contributionFrequency || "mensual")) throw new Error("Revisa el nombre, los montos y la frecuencia. El objetivo no puede ser menor al dinero ya asignado.");
+      if(!next.name?.trim() || !(Number(next.target)>0) || !Number.isFinite(Number(next.target)) || Number(next.target)<money(Number(previous.current)+goalUsed(state,previous.id)) || !Number.isFinite(Number(next.monthlyContribution || 0)) || Number(next.monthlyContribution || 0)<0 || !["mensual","semanal"].includes(next.contributionFrequency || "mensual")) throw new Error("Revisa el nombre, los montos y la frecuencia. El objetivo no puede ser menor al dinero ya asignado.");
       return {...state,goals:state.goals.map(goal=>goal.id === next.id ? next : goal)};
     }
 
     case "DELETE_GOAL": {
+      if(state.transactions.some(tx=>tx.savingsFunding?.goalId===action.payload)) throw new Error("Este plan tiene gastos vinculados. Archívalo para conservar el historial.");
       if(state.goals.find(goal=>goal.id === action.payload)?.system === "standard_savings") throw new Error("Ahorros es el plan general de tus ahorros existentes y no se elimina.");
       if ((state.savingsAllocations || []).some(item=>item.goalId === action.payload && item.amount > 0)) throw new Error("Libera primero los aportes vinculados al plan.");
       if ((state.monthlyPlans || []).some(plan=>plan.month >= localDateString().slice(0,7) && plan.savings.some(item=>item.goalId === action.payload && item.estimated>0))) throw new Error("Quita primero sus aportes previstos en Mi mes para no dejar compromisos sin plan.");
@@ -326,7 +359,7 @@ export function financeReducer(state, action) {
       const payment = Math.min(
         amount,
         Math.max(0, Number(debt.balance) || 0),
-        Math.max(0, Number(account.balance) || 0)
+        Math.max(0, money(Number(account.balance)-reservedInAccount(state,account.id)))
       );
       if (payment <= 0) return state;
       const date = new Date();

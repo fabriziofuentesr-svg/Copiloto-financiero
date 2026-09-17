@@ -1,7 +1,7 @@
 // Cálculos de objetivos financieros (metas de ahorro) y su simulador.
 export function goalProgress(goal) {
-  const restante = Math.max(0, goal.target - goal.current);
-  const progresoPct = goal.target > 0 ? Math.min(1, goal.current / goal.target) : 0;
+  const restante = Math.max(0, goal.target - Number(goal.current) - Number(goal.used || 0));
+  const progresoPct = goal.target > 0 ? Math.min(1, (Number(goal.current) + Number(goal.used || 0)) / goal.target) : 0;
   return { restante, progresoPct };
 }
 

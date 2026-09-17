@@ -4,7 +4,7 @@ import { fmtBs, fmtFecha, fmtPct } from "../../services/financial/format.js";
 import { ProgressBar, Badge } from "../ui/primitives.jsx";
 import { goalProgress, estimateGoalCompletion } from "../../services/financial/goals.js";
 
-export function AccountCard({ account, currency = account.currency, onDelete, onEdit }) {
+export function AccountCard({ account, currency = account.currency, reserved = 0, onDelete, onEdit }) {
   const isCard = account.type === "tarjeta_credito";
   return (
     <div className="border border-line rounded p-4 flex flex-col gap-1 bg-paper">
@@ -15,7 +15,8 @@ export function AccountCard({ account, currency = account.currency, onDelete, on
       <div className={`font-display text-xl font-semibold ${isCard ? "text-brick" : "text-teal"}`}>
         {fmtBs(Math.abs(account.balance), currency)}
       </div>
-      <div className="text-ink-soft text-xs">{isCard ? "Saldo utilizado" : "Disponible"}</div>
+      <div className="text-ink-soft text-xs">{isCard ? "Saldo utilizado" : "Saldo real"}</div>
+      {!isCard ? <p className="text-xs text-ink-soft">Apartado {fmtBs(reserved,currency)} · Disponible {fmtBs(account.balance-reserved,currency)}</p> : null}
       {isCard ? <div className="text-ink-soft text-xs">Pago mínimo: {account.minimumPayment ? fmtBs(account.minimumPayment, currency) : "Por completar"} · Día de pago: {account.paymentDay || "Por completar"}</div> : null}
     </div>
   );
@@ -30,6 +31,7 @@ export function TransactionItem({ tx, categoryName, accountName, currency = "BOB
         <div className="text-ink-soft text-xs truncate">
           {categoryName} · {accountName} · {fmtFecha(tx.date)}
         </div>
+        {tx.savingsFunding?.amount > 0 ? <Badge level="neutral">Pagado con el plan {tx.savingsFunding.goalName || "de ahorro"} · {fmtBs(tx.savingsFunding.amount,currency)}</Badge> : null}
         {tx.generated ? <Badge level="neutral">{tx.origin === "initial_balance" ? "Generado al crear la cuenta" : "Movimiento generado"}</Badge> : null}
       </div>
       <div className={`font-medium tabular-nums ${isIngreso ? "text-teal" : "text-ink"}`}>
@@ -48,20 +50,23 @@ export function GoalCard({ goal, currency = "BOB", onDelete, onOpen, onAdd, onEd
     <div className="border border-line rounded p-4 flex flex-col gap-2 bg-paper">
       <div className="flex items-center justify-between">
         <span className="font-medium text-sm">{goal.name}</span>
-        <div className="flex gap-2">{onEdit ? <button onClick={onEdit} className="text-ink-soft hover:text-teal" aria-label={`Editar ${goal.name}`}><Pencil size={14} /></button> : null}{onDelete ? <button onClick={onDelete} className="text-ink-soft hover:text-brick" aria-label={`Eliminar ${goal.name}`}><Trash2 size={14} /></button> : null}</div>
+        <div className="flex gap-2">{onEdit ? <button onClick={onEdit} className="text-ink-soft hover:text-teal" aria-label={`Editar ${goal.name}`}><Pencil size={14} /></button> : null}{onDelete ? <button onClick={onDelete} className="text-ink-soft hover:text-brick" aria-label={`Archivar ${goal.name}`}><Trash2 size={14} /></button> : null}</div>
       </div>
       <div className="text-ink-soft text-xs">
-        {goal.system === "standard_savings" ? `${fmtBs(goal.current,currency)} vinculados a tus cuentas` : `${fmtBs(goal.current,currency)} de ${fmtBs(goal.target,currency)} · ${fmtPct(progresoPct)}`}
+        {goal.system === "standard_savings" ? `${fmtBs(goal.current,currency)} vinculados a tus cuentas` : `${fmtBs(goal.current,currency)} apartados · ${fmtBs(goal.used || 0,currency)} utilizados para este objetivo · ${fmtBs(goal.target,currency)} de meta · ${fmtPct(progresoPct)}`}
       </div>
+      <p className="text-xs text-ink-soft">Aporte previsto pendiente: {fmtBs(goal.plannedPending || 0,currency)}</p>
+      {goal.locations?.length ? <p className="text-xs text-ink-soft">{goal.locations.join(" · ")}</p> : null}
+      {goal.needsReconciliation ? <p className="text-xs text-brick">Hay avance anterior sin ubicación confirmada. Vincúlalo a sus cuentas reales antes de utilizarlo.</p> : null}
       {goal.system !== "standard_savings" ? <ProgressBar value={progresoPct * 100} color="#1F5C56" /> : null}
       <div className="text-ink-soft text-xs">
-        {goal.system === "standard_savings" ? "Dinero existente sin un objetivo específico; puedes reasignarlo a otro plan." : est.date == null
+        {goal.system === "standard_savings" ? "Dinero existente sin un objetivo específico; puedes reasignarlo a otro plan." : restante === 0 ? "Meta cubierta con dinero apartado o ya utilizado para este objetivo." : est.date == null
           ? "Define un aporte mensual para estimar la fecha."
           : `A ${fmtBs(goal.monthlyContribution,currency)} por ${goal.contributionFrequency === "semanal" ? "semana" : "mes"}, la alcanzas en ${est.periods ?? est.months} ${goal.contributionFrequency === "semanal" ? "semanas" : "meses"} (${est.date.toLocaleDateString("es-BO")}).`}
       </div>
       {onAdd && (
         <button onClick={onAdd} className="text-ochre text-xs underline text-left mt-1">
-          Registrar aporte
+          Apartar dinero
         </button>
       )}
       {onOpen && goal.system !== "standard_savings" && (

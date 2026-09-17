@@ -4,6 +4,8 @@ import { Plus } from "lucide-react";
 import { useFinanceState, useFinanceDispatch } from "../context/FinanceContext.jsx";
 import { Card, Button, Modal, Field, Input, ProgressBar, Select , MoneyInput } from "../components/ui/primitives.jsx";
 import { GoalCard, DebtCard } from "../components/finance/cards.jsx";
+import { goalUsed } from "../services/financial/savingsFunding.js";
+import { monthlyPlanStatus } from "../services/financial/monthlyPlan.js";
 import { estimateGoalCompletion } from "../services/financial/goals.js";
 import { compareExtraPayment } from "../services/financial/debts.js";
 import { getEmergencyFundStatus, getTotalDebtInstallments } from "../services/financial/calculations.js";
@@ -67,6 +69,7 @@ function Objetivos({ autoOpen }) {
     setModalOpen(false);
   }
 
+  const status=monthlyPlanStatus(state);
   const simulacion = simGoal && simAporte ? estimateGoalCompletion(simGoal, Number(simAporte)) : null;
 
   return (
@@ -77,12 +80,12 @@ function Objetivos({ autoOpen }) {
         </Button>
       </div>
       <div className="grid sm:grid-cols-2 gap-4">
-        {state.goals.map((g) => (
+        {state.goals.filter(g=>!g.archived).map((g) => (
           <GoalCard
             key={g.id}
-            goal={g}
+            goal={{...g,used:goalUsed(state,g.id),plannedPending:status.savings?.find(row=>row.goalId===g.id)?.pending || 0,locations:state.savingsAllocations.filter(row=>row.goalId===g.id).map(row=>`${state.accounts.find(account=>account.id===row.accountId)?.name}: ${fmtBs(row.amount,currency)}`)}}
             currency={currency}
-            onDelete={g.system === "standard_savings" ? undefined : () => { if (state.savingsAllocations.some(item=>item.goalId === g.id && item.amount > 0)) { window.alert("Libera primero los aportes vinculados a este plan."); return; } if (window.confirm(`Eliminar el objetivo “${g.name}”? Los aportes registrados se conservarán en el historial de ahorro.`)) dispatch({ type: "DELETE_GOAL", payload: g.id }); }}
+            onDelete={g.system === "standard_savings" ? undefined : () => { if (state.savingsAllocations.some(item=>item.goalId === g.id && item.amount > 0)) { window.alert("Libera primero los aportes vinculados a este plan."); return; } if (window.confirm(`Archivar el objetivo “${g.name}”? Se conservarán sus aportes y gastos. Los aportes previstos pendientes se cancelarán.`)) dispatch({ type: "ARCHIVE_GOAL", payload: g.id }); }}
             onEdit={g.system === "standard_savings" ? undefined : () => { setEditingGoal(g); setForm({ name: g.name, target: String(g.target), current: String(g.current), monthlyContribution: String(g.monthlyContribution || 0), contributionFrequency: g.contributionFrequency || "mensual" }); setModalOpen(true); }}
             onAdd={() => {
               setAporteGoal(g);
@@ -97,6 +100,8 @@ function Objetivos({ autoOpen }) {
         {state.goals.length === 0 && <p className="text-ink-soft text-sm">Aún no tienes objetivos. Crea el primero.</p>}
       </div>
 
+      <details><summary>Historial de apartados y usos</summary>{state.savingsContributions.map(event=><p key={event.id} className="text-xs mt-2">{event.date} · {event.goalName || state.goals.find(goal=>goal.id===event.linkedGoalId)?.name} · {{protect:"Apartado",release:"Liberado",reassign:"Reasignado",move:"Trasladado entre cuentas",reconcile:"Ubicación conciliada",initial_protection:"Ahorro inicial confirmado",transfer:"Transferido y apartado"}[event.method] || "Apartado"} · {fmtBs(event.amount,currency)}</p>)}{state.transactions.filter(tx=>tx.savingsFunding?.amount>0).map(tx=><p key={tx.id} className="text-xs mt-2">{tx.date} · Utilizado para {tx.savingsFunding.goalName || state.goals.find(goal=>goal.id===tx.savingsFunding.goalId)?.name} · {tx.description} · {fmtBs(tx.savingsFunding.amount,currency)}</p>)}</details>
+      {state.goals.filter(goal=>goal.archived).length ? <details><summary>Planes archivados</summary>{state.goals.filter(goal=>goal.archived).map(goal=><p key={goal.id} className="text-sm">{goal.name} · {fmtBs(goalUsed(state,goal.id),currency)} utilizados para el objetivo</p>)}</details> : null}
       <Modal open={Boolean(aporteGoal)} onClose={() => setAporteGoal(null)} title="Registrar aporte">
         <SavingsOperationForm key={aporteGoal?.id} goalId={aporteGoal?.id} onSuccess={()=>setAporteGoal(null)} />
       </Modal>

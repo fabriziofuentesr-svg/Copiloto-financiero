@@ -3,7 +3,7 @@ import { normalizeCategory } from "./categories.js";
 import { categorySnapshot } from "./financial/monthlyPlan.js";
 import { ensureStandardSavings } from "./financial/standardSavings.js";
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 function mergeCategories(saved = []) {
   const byId = new Map(CATEGORIES.map((category) => [category.id, category]));
@@ -44,7 +44,7 @@ export function migrateState(savedState) {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     profile: { ...empty.profile, timezone: "America/La_Paz", ...(savedState.profile || {}) },
     accounts,
-    goals: (savedState.goals || []).map(goal=>({contributionFrequency:"mensual",...goal})),
+    goals: (savedState.goals || []).map(goal=>({contributionFrequency:"mensual", archived:false,...goal, needsReconciliation:Number(goal.current || 0) > (savedState.savingsAllocations || []).filter(row=>row.goalId===goal.id).reduce((sum,row)=>sum+Number(row.amount),0)})),
     transactions,
     categories,
     monthlyPlans: savedState.monthlyPlans || [],

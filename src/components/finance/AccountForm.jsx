@@ -27,7 +27,9 @@ export function AccountForm({ account = null, onSuccess, submitLabel }) {
   const isEditing = Boolean(account);
   const isCard = form.type === "tarjeta_credito";
 
-  function handleSubmit(event) {
+  const [error,setError]=useState("");
+  const [busy,setBusy]=useState(false);
+  async function handleSubmit(event) {
     event.preventDefault();
     const balance = Number(form.balance);
     const creditLimit = Number(form.creditLimit || 0);
@@ -43,13 +45,13 @@ export function AccountForm({ account = null, onSuccess, submitLabel }) {
       minimumPayment: isCard ? minimumPayment || null : null,
       rate: isCard ? Number(form.rate) || null : null,
     };
-    if (isEditing) {
-      dispatch({ type: "UPDATE_ACCOUNT_METADATA", payload: { id: account.id, ...payload } });
-      dispatch({ type: "ADJUST_ACCOUNT_BALANCE", payload: { id: account.id, balance } });
-    } else {
-      dispatch({ type: "CREATE_ACCOUNT", payload: { ...payload, requestId: requestId.current } });
-      setForm(EMPTY_ACCOUNT);
-    }
+    if(busy) return;
+    setBusy(true);
+    const result=await dispatch(isEditing ? {type:"UPDATE_ACCOUNT_AND_BALANCE",payload:{id:account.id,...payload}} : {type:"CREATE_ACCOUNT",payload:{...payload,requestId:requestId.current}});
+    setBusy(false);
+    if(result?.ok===false){setError(result.error);return;}
+    setError("");
+    if(!isEditing){setForm(EMPTY_ACCOUNT);requestId.current=crypto.randomUUID();}
     onSuccess?.();
   }
 
@@ -75,7 +77,8 @@ export function AccountForm({ account = null, onSuccess, submitLabel }) {
           <Field label="Tasa anual (%)"><Input type="number" min="0" max="300" step="0.01" value={form.rate} onChange={(event) => setForm((current) => ({ ...current, rate: event.target.value }))} /></Field>
         </div>
       ) : null}
-      <Button type="submit" className="mt-1">{submitLabel || (isEditing ? "Guardar cambios" : "Guardar cuenta")}</Button>
+      {error ? <p role="alert" className="text-sm text-brick">{error}</p> : null}
+      <Button disabled={busy} type="submit" className="mt-1">{submitLabel || (isEditing ? "Guardar cambios" : "Guardar cuenta")}</Button>
     </form>
   );
 }
